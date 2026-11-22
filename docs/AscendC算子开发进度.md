@@ -1,5 +1,8 @@
 # Qwen3.8-27B 在 310B 上的 AscendC 自研算子开发进度
 
+> 📌 **目录变更说明（2026-11-22）**：本文记录的是当时使用的板端路径 `~/qwen38_310b/ascendc_ops`、`~/models/qwen38_310b`。
+> 现在板端已统一整理为 `~/code/qwen38_310B/`（`src/` 源码 + `models/qwen38_310b/` 权重），见 [BOARD_LAYOUT.md](BOARD_LAYOUT.md)。
+
 > 目标：不依赖现有的 MindIE/vLLM/ATC 路线，自己用 AscendC 写 Qwen3.8-27B 所需的 NPU 算子，
 > 逐步搭出一个能在 OrangePi AI Pro 20T（Ascend310B1，23.6GB，CANN 8.0.0）上跑的推理引擎。
 

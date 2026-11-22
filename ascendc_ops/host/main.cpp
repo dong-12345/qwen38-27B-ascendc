@@ -1153,7 +1153,7 @@ int main(int argc, char *argv[])
         rc = run_engine_mini(g_stream);
     } else if (test == "engine_27b") {
         { const char *d = getenv("ENG27_DIR");
-          rc = run_engine_27b(g_stream, d ? d : "/home/HwHiAiUser/models/qwen38_310b"); }
+          rc = run_engine_27b(g_stream, d ? d : "/home/HwHiAiUser/code/qwen38_310B/models/qwen38_310b"); }
     } else if (test == "w4a16_gemv_gen") {
         rc = test_w4a16_gemv_gen();
     } else if (test == "probe_gather") {

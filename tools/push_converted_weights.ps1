@@ -3,7 +3,7 @@ param(
     [string]$Board = "192.168.137.163",
     [string]$Key = "D:\项目4\orangepi_aipro\tools\opi_key",
     [string]$Local = "D:\项目4\orangepi_aipro\converted\qwen38_310b",
-    [string]$Remote = "/home/HwHiAiUser/models/qwen38_310b"
+    [string]$Remote = "/home/HwHiAiUser/code/qwen38_310B/models/qwen38_310b"
 )
 $ErrorActionPreference = 'Continue'
 $sshOpts = @("-i", $Key, "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=NUL",

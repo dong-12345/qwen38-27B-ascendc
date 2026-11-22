@@ -251,3 +251,60 @@ class DepthCleaner:
         out[d <= 0] = 0.0
         self.prev = np.where(d > 0, out, self.prev)
         return np.clip(out, 0, 65535).astype(np.uint16)
+
+class ClassicCompleter:
+    """Real-time CPU depth completion: outlier removal + colour-guided fill.
+
+    Steps (640x480, ~20 ms on the OrangePi CPU):
+      1. 3x3 median -> kill salt & pepper returns
+      2. drop pixels that disagree with the local median (flying pixels / edges)
+      3. coarse smooth prior by normalised convolution at 1/8 resolution
+      4. guided filter with the RGB frame -> prior snaps to colour edges
+      5. keep the measured depth wherever it survived, fill the rest
+    """
+
+    def __init__(self, median_k=3, outlier_mm=180.0, eps=400.0, radius=8, temporal=0.45):
+        self.median_k = median_k
+        self.outlier_mm = outlier_mm
+        self.eps = eps
+        self.radius = radius
+        self.temporal = temporal
+        self.prev = None
+        self.hole_frac = 0.0
+        self._lut = None
+
+    def _coarse(self, d, valid):
+        h, w = d.shape
+        sw, sh = max(1, w // 8), max(1, h // 8)
+        small = cv2.resize(np.where(valid, d, 0).astype(np.float32), (sw, sh), interpolation=cv2.INTER_AREA)
+        cnt = cv2.resize(valid.astype(np.float32), (sw, sh), interpolation=cv2.INTER_AREA)
+        num = cv2.GaussianBlur(small, (0, 0), 2.0)
+        den = cv2.GaussianBlur(cnt, (0, 0), 2.0)
+        prior = num / np.maximum(den, 1e-3)
+        return cv2.resize(prior, (w, h), interpolation=cv2.INTER_LINEAR)
+
+    def __call__(self, tof_mm, rgb_bgr):
+        d = tof_mm.astype(np.float32)
+        valid = d > 0
+        if self.median_k >= 3:
+            med = cv2.medianBlur(tof_mm, self.median_k).astype(np.float32)
+            valid &= np.abs(d - med) < self.outlier_mm
+            d = np.where(valid, med, 0.0)
+        prior = self._coarse(d, valid)
+        filled = prior
+        if hasattr(cv2, "ximgproc"):
+            src = np.where(valid, d, prior).astype(np.float32)
+            guide = cv2.resize(rgb_bgr, (d.shape[1], d.shape[0]), interpolation=cv2.INTER_AREA)
+            filled = cv2.ximgproc.guidedFilter(guide, src, self.radius, self.eps)
+        out = np.where(valid, d, filled)
+        self.hole_frac = float((~valid).mean())
+        if self.temporal > 0:
+            if self.prev is None or self.prev.shape != out.shape:
+                self.prev = out.copy()
+            else:
+                jump = np.abs(out - self.prev) > 400.0
+                ema = cv2.addWeighted(out, 1.0 - self.temporal, self.prev, self.temporal, 0)
+                ema[jump] = out[jump]
+                out = ema
+                self.prev = out.copy()
+        return np.clip(out, 0, 65535).astype(np.uint16)

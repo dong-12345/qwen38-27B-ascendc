@@ -115,14 +115,15 @@ python tools/convert_qwen38.py \
 python tools/export_engine_meta.py --dir converted/qwen38_310b
 ```
 
-转换出的权重目录需整体拷到板端（本项目里是 `~/models/qwen38_310b`，16.9 GB）。
+转换出的权重目录需整体拷到板端（本项目的板端布局：`~/code/qwen38_310B/models/qwen38_310b`，16.9 GB）。
 
 ### 4.4 跑模型
 
 ```bash
-# 板端
-ENG27_GEN=6 ENG27_DIR=$HOME/models/qwen38_310b ./qwen38_ops_test engine_27b
-# 指定 prompt（PC 侧，自动分词 + ssh + 解码）
+# 板端（目录布局见 docs/BOARD_LAYOUT.md）
+cd ~/code/qwen38_310B && source env.sh
+ENG27_GEN=6 ./src/out/bin/qwen38_ops_test engine_27b
+# 指定 prompt（PC 侧，自动分词 + ssh + 解码；已内置 chat template + <think>）
 python tools/run_27b_demo.py --prompt "The capital of France is" --gen 6
 ```
 

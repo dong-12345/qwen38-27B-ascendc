@@ -113,8 +113,9 @@ python tools/push_to_hf.py \
 ## 4. 使用（Ascend 310B 引擎）
 
 ```bash
-# 板端：把本仓库权重放到 ~/models/qwen38_310b
-ENG27_DIR=$HOME/models/qwen38_310b ENG27_GEN=8 ./qwen38_ops_test engine_27b
+# 板端：把本仓库权重放到 ~/code/qwen38_310B/models/qwen38_310b
+cd ~/code/qwen38_310B && source env.sh
+ENG27_GEN=8 ./src/out/bin/qwen38_ops_test engine_27b
 ```
 
 实测（OrangePi AI Pro 20T，Ascend 310B1，CANN 8.0.0）：

@@ -1,5 +1,8 @@
 # 310B（OrangePi AI Pro 20T）性能上限与 prefill 提速方案
 
+> 📌 **目录变更说明（2026-11-22）**：本文记录的是当时使用的板端路径 `~/qwen38_310b/ascendc_ops`、`~/models/qwen38_310b`。
+> 现在板端已统一整理为 `~/code/qwen38_310B/`（`src/` 源码 + `models/qwen38_310b/` 权重），见 [BOARD_LAYOUT.md](BOARD_LAYOUT.md)。
+
 > 目标：回答三个问题——① 硬件理论值是多少、当前实现离理论极限多远；② `blockDim>1` 到底有没有多核并行；
 > ③ prefill 还能怎么提速（按加速比排序，含工作量与风险）。
 >
