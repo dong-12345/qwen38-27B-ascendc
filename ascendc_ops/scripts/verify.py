@@ -40,6 +40,16 @@ def main():
               np.float32, rtol=2e-3, atol=2e-3)
     ok &= cmp("gdn_gating.beta", "output/gdn_gating_beta.bin",
               "input_golden/gdn_gating_beta.bin", np.float32, rtol=2e-3, atol=2e-3)
+    ok &= cmp("gdn_conv1d.y", "output/gdn_conv1d_y.bin", "input_golden/gdn_conv1d_y.bin",
+              np.float16, rtol=3e-3, atol=3e-3)
+    ok &= cmp("gdn_l2norm.y", "output/gdn_l2norm_y.bin", "input_golden/gdn_l2norm_y.bin",
+              np.float16, rtol=3e-3, atol=3e-3)
+    ok &= cmp("gdn_cumsum.g_cum", "output/gdn_cumsum_gcum.bin",
+              "input_golden/gdn_cumsum_gcum.bin", np.float32, rtol=1e-5, atol=1e-5)
+    ok &= cmp("gdn_gated_rmsnorm.y", "output/gdn_gated_rmsnorm_y.bin",
+              "input_golden/gdn_gated_rmsnorm_y.bin", np.float16, rtol=4e-3, atol=4e-3)
+    ok &= cmp("w4a16_gemv.out", "output/w4a16_out.bin", "input_golden/w4a16_out.bin",
+              np.float16, rtol=6e-3, atol=6e-3)
     print("ALL PASS" if ok else "SOME FAILED")
     return 0 if ok else 1
 

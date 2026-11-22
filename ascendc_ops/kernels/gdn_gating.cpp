@@ -39,11 +39,11 @@ public:
 
         pipe.InitBuffer(inQueueA, 1, SEQ * sizeof(half));
         pipe.InitBuffer(inQueueB, 1, SEQ * sizeof(half));
-        pipe.InitBuffer(smallDt, 1, SMALL_BYTES);
-        pipe.InitBuffer(smallGs, 1, SMALL_BYTES);
-        pipe.InitBuffer(bufA, 1, SEQ * sizeof(float));
-        pipe.InitBuffer(bufB, 1, SEQ * sizeof(float));
-        pipe.InitBuffer(bufT, 1, SEQ * sizeof(float));
+        pipe.InitBuffer(smallDt, SMALL_BYTES);
+        pipe.InitBuffer(smallGs, SMALL_BYTES);
+        pipe.InitBuffer(bufA, SEQ * sizeof(float));
+        pipe.InitBuffer(bufB, SEQ * sizeof(float));
+        pipe.InitBuffer(bufT, SEQ * sizeof(float));
         pipe.InitBuffer(outQueueG, 1, SEQ * sizeof(float));
         pipe.InitBuffer(outQueueBeta, 1, SEQ * sizeof(float));
     }
