@@ -19,7 +19,7 @@
 | 参数量 | 27.78 B（4bit 后权重 ≈16.9 GB） |
 | 文件数 | 1670 个（`model/` 下按层组织） + `meta.txt` |
 | 语言 | 多语言（文本）；本打包不含视觉/音频塔 |
-| 许可 | 遵循上游 Qwen 许可；**原始权重需自行从官方渠道获取** |
+| 许可 | **Apache License 2.0**（上游 LICENSE 实测：Copyright 2026 Alibaba Cloud）；本仓库同许可分发并声明修改内容 |
 
 ---
 
@@ -135,7 +135,22 @@ ENG27_DIR=$HOME/models/qwen38_310b ENG27_GEN=8 ./qwen38_ops_test engine_27b
 - **fp16 激活**：与上游 bf16 训练有细微数值差异（实测 logits 与独立 fp32 参考一致到 1e-2）。
 - `embed_tokens` / `lm_head` 也做了 4bit 重量化（误差 0.0000~0.0002，可忽略）。
 
-## 6. 引用 / 致谢
+## 6. 许可与合规（Apache-2.0）
+
+上游 `Qwen3.8-27B` 的 LICENSE 实测为 **Apache License 2.0，Copyright 2026 Alibaba Cloud**（见权重目录 `LICENSE`）。
+Apache-2.0 **允许再分发与修改**，但需履行以下义务（本仓库已逐条落实）：
+
+| Apache-2.0 条款 | 本仓库的做法 |
+|---|---|
+| §4(a) 提供 License 副本 | 权重目录内含 `LICENSE`（原样复制） |
+| §4(b) 声明修改 | 权重目录内含 `MODIFICATIONS.md`，逐项列出：重打包为 W4A16 相位交织格式、bf16→fp16、1-centered norm 加 1、只保留语言塔并移除视觉塔/MTP、embed/lm_head 重量化 |
+| §4(c) 保留归属声明 | 本 model card 与 `MODIFICATIONS.md` 均保留 "Copyright 2026 Alibaba Cloud" 与上游模型名 |
+| §6 商标 | 仅以描述性方式提及 "Qwen"（说明来源），不暗示官方背书；未使用 Qwen logo |
+
+**使用须知**：本权重是**实验性格式**（只对自研 AscendC 引擎有效），不是通用模型格式；
+需要通用格式请使用官方原始权重。商用/再分发前请自行复核上游许可条款与适用法律。
+
+## 7. 引用 / 致谢
 
 - 基础模型与架构：Qwen 团队（Qwen3.5）
 - AscendC 算子与引擎：本项目

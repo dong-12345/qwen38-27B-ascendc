@@ -188,5 +188,18 @@ code/                其他支线（ToF U3V 直连、深度补全）
 
 ## 8. License
 
-代码（`ascendc_ops/`、`tools/`）以 **Apache-2.0** 发布。
-模型权重与其衍生物（转换后的 4bit 权重）遵循原模型 **Qwen 许可**，需自行从官方渠道获取原始权重后转换。
+本仓库代码（`ascendc_ops/`、`tools/`）以 **Apache License 2.0** 发布。
+
+上游模型 `Qwen3.8-27B` 的 LICENSE 实测为 **Apache License 2.0**
+（Copyright 2026 Alibaba Cloud，见原始权重目录的 LICENSE）。Apache-2.0 **允许再分发与修改**，
+转换后的权重同样以 Apache-2.0 分发，并履行 §4 义务：
+
+| 义务 | 落实方式 |
+|---|---|
+| 提供 License 副本 | 权重目录内 `LICENSE` |
+| 声明修改 | 权重目录内 `MODIFICATIONS.md`（重打包格式 / bf16→fp16 / 1-centered norm 修正 / 只保留语言塔） |
+| 保留归属 | model card 与 `MODIFICATIONS.md` 保留 "Copyright 2026 Alibaba Cloud" |
+| 商标 | 仅描述性提及 "Qwen"，不暗示官方背书 |
+
+> ⚠️ 转换后的权重是**实验性格式**（仅自研引擎可用）；需要通用格式请使用官方原始权重。
+> 商用或再分发前请自行复核上游许可条款与适用法律。
