@@ -37,7 +37,7 @@
 cd ~/code/qwen38_310B
 source env.sh                      # CANN 环境 + LD_LIBRARY_PATH + ENG27_DIR
 
-# 1) 编译（约 2~4 分钟）
+# 1) 编译（约 2–4 分钟）
 bash src/run.sh build
 
 # 2) 算子单测（用真实权重）

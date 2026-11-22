@@ -43,7 +43,7 @@ w ≈ s·(q − z),  q∈[0,15]  →  预存 sz = s·z
 out[n] = Σ_g s[n,g]·Σ_{k∈g} q_k·act_k  −  Σ_g sz[n,g]·suma[g]
 ```
 
-→ 量化误差实测 **0.0000~0.0002**（group-64 会劣化到 6.2%，所以必须 group-32）。
+→ 量化误差实测 **0.0000–0.0002**（group-64 会劣化到 6.2%，所以必须 group-32）。
 
 ### 2.2 相位交织（性能关键）
 
@@ -177,7 +177,7 @@ attn_output = attn_output * torch.sigmoid(gate)     # 不是 silu(gate)
 | 阶段 | 耗时 |
 |---|---|
 | 权重加载（16.9 GB） | ~84 s |
-| 单 token 前向（64 层） | **14.3~14.6 s** |
+| 单 token 前向（64 层） | **14.3–14.6 s** |
 | decode 吞吐 | **0.069 tok/s** |
 | prefill | 与 decode 同速（逐 token 前向，无 batch） |
 

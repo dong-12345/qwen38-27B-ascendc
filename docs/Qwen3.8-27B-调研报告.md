@@ -39,7 +39,7 @@
 
 - 权重：`Eco-Tech/Qwen3.8-27B-w8a8-310p`（36.4GB / 9 分片，含视觉 + MTP 头）
 - 镜像：`quay.io/ascend/vllm-ascend:v0.23.0-310p`（CANN 9.1.0 / torch_npu 2.10.0 / vllm 0.23.0）
-- 硬件价格：300I Duo 96G 约 ¥1.1~1.36 万；AI Studio Pro 96G ¥13,606 / 192G ¥15,698（预售）
+- 硬件价格：300I Duo 96G 约 ¥1.1–1.36 万；AI Studio Pro 96G ¥13,606 / 192G ¥15,698（预售）
 
 **生产稳定版（不开 MTP，实测 9.1 tok/s）**：
 
@@ -72,8 +72,8 @@ vllm serve Eco-Tech/Qwen3.8-27B-w8a8-310p \
 ```
 
 ⚠️ **310P 上 MTP 的真实表现（重要，别盲信文档）**：
-- 社区生产实测（AI Studio Pro 192G，k=1）：acceptance 20%~57%、平均接受长度 1.2~1.57，但 **8.8 tok/s vs 不开 MTP 的 9.1 tok/s（净负收益）**，且**中文输出乱码**（310P rejection sampler 走 fallback 有验证数学缺陷），已回滚。
-- 另一路实测（去掉 `--enforce-eager` + 图模式 + MTP3）：decode 9.4~10.9 → **18.3~21.3 tok/s**（未复现）。
+- 社区生产实测（AI Studio Pro 192G，k=1）：acceptance 20%~57%、平均接受长度 1.2–1.57，但 **8.8 tok/s vs 不开 MTP 的 9.1 tok/s（净负收益）**，且**中文输出乱码**（310P rejection sampler 走 fallback 有验证数学缺陷），已回滚。
+- 另一路实测（去掉 `--enforce-eager` + 图模式 + MTP3）：decode 9.4–10.9 → **18.3–21.3 tok/s**（未复现）。
 
 **310P 关键约束**：只支持 TP=2/4；`--dtype float16` 必须；`--mamba-ssm-cache-dtype` 只支持 float16；`num_speculative_tokens` 建议 1；capture size 必须是 `n × (num_speculative_tokens+1)`；`enable_npugraph_ex` 必须 false。
 
@@ -82,7 +82,7 @@ vllm serve Eco-Tech/Qwen3.8-27B-w8a8-310p \
 - 权重：`Eco-Tech/Qwen3.8-27B-w8a8`（约 30GB）
 - 镜像：`quay.io/ascend/vllm-ascend:qwen3.8-a2` / `qwen3.8-a3`
 - 启动：TP=2、`--speculative-config '{"method":"qwen3_5_mtp","num_speculative_tokens":3}'`、`--dtype bfloat16`、`--max-model-len 133120`
-- 官方口径 TP=2；同代 27B 在 A2 上通常 30~60 tok/s 量级
+- 官方口径 TP=2；同代 27B 在 A2 上通常 30–60 tok/s 量级
 
 ### 3.3 昇腾 950PR/950DT（预算允许时的最优昇腾路径）
 
@@ -106,11 +106,11 @@ vllm serve Eco-Tech/Qwen3.8-27B-w8a8-310p \
 
 | 模型 | 规模 | 310B 现状 | 速度 |
 |---|---|---|---|
-| **Qwen3-1.7B / Qwen3-4B** | 标准 GQA | ✅ **MindIE 官方 OrangePi 配方**（ModelZoo `MindIE/LLM/Qwen3/Qwen3-*-OrangePi`），需 CANN 8.1.RC1 + MindIE ATB-Models 2.0.RC1 | 4B 约 3~8 tok/s |
+| **Qwen3-1.7B / Qwen3-4B** | 标准 GQA | ✅ **MindIE 官方 OrangePi 配方**（ModelZoo `MindIE/LLM/Qwen3/Qwen3-*-OrangePi`），需 CANN 8.1.RC1 + MindIE ATB-Models 2.0.RC1 | 4B 约 3–8 tok/s |
 | DeepSeek-R1-Distill-Qwen-1.5B | 标准 | ✅ 官方主推（MindSpore / MindIE / openKylin 都适配） | ~7 tok/s |
 | **Gemma4 E2B** | 2B 混合滑窗 | ✅ 社区自研引擎实测 | **11.8 tok/s（Q4_0）** |
 | **MiniCPM-V 4.6/4.7-1B** | 1.5B 多模态（底座 Qwen3.5-0.8B GDN） | ✅ 社区从零 C++/AscendC 引擎（`lvyufeng/minicpm-v-4.6-orangepi`），支持多切片 OCR / server | ~5-10 tok/s |
-| **Ling-mini-2.0** | 16B 总 / 1.4B 激活，纯 GQA + MoE | 🟡 GGUF 可 CPU 跑；NPU 需自写 MoE 路由（1~2 人月） | CPU 预计 3~8 tok/s |
+| **Ling-mini-2.0** | 16B 总 / 1.4B 激活，纯 GQA + MoE | 🟡 GGUF 可 CPU 跑；NPU 需自写 MoE 路由（1–2 人月） | CPU 预计 3–8 tok/s |
 | Qwen3-8B / 14B / 32B、Qwen3.8-27B、Qwen3.5 全系 | — | ❌（8B 是极限且 <1 tok/s；GDN 系列无算子） | — |
 
 **310B 选型公式**：`总参数 ≤16B 且激活 ≤2B 的稀疏 MoE`，或 `≤4B 的纯 GQA dense`；**任何线性注意力（GDN/KDA/MLA/Lightning）都是死刑**。
@@ -127,8 +127,8 @@ vllm serve Eco-Tech/Qwen3.8-27B-w8a8-310p \
 
 **不值。** 需要补的不是几个算子，而是一条 GDN 6 阶段链路 + 状态机（chunk_cumsum / scaled_dot_kkt / solve_tril / wy_fast / chunk_h / chunk_o）+ RGDR 解码 + conv1d + 门控融合 + 状态缓存 + 投机解码状态回滚 + INT4 融合 GEMM，外加视觉塔/MTP。
 
-- 工作量：L1（llama.cpp + 自写 matmul）1~2 人月 → 0.2~0.5 tok/s；L3（vLLM-Ascend `_310b` 后端）6~12 人月，且不会被上游 merge
-- 硬件对比：一块 300I Duo（¥1.1~1.36 万）直接 9~21 tok/s；一个资深昇腾算子工程师 1 人月成本 ≥ 一块卡
+- 工作量：L1（llama.cpp + 自写 matmul）1–2 人月 → 0.2–0.5 tok/s；L3（vLLM-Ascend `_310b` 后端）6–12 人月，且不会被上游 merge
+- 硬件对比：一块 300I Duo（¥1.1–1.36 万）直接 9–21 tok/s；一个资深昇腾算子工程师 1 人月成本 ≥ 一块卡
 
 ---
 

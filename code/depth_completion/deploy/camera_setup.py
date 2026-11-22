@@ -1,15 +1,5 @@
 #!/usr/bin/env python3
-"""camera_setup.py - restore the RGBD stream configuration through the vendor SDK.
-
-Two things are needed for the camera to stream depth + colour + IR:
-  * ImageMode = 0x8   (colour mode, which flips PixelFormat to RGB8_Planar)
-  * OutputRgbd = 1    (also emit the depth plane; this parameter is VOLATILE
-                       and reverts to 0 whenever the SDK closes, so it has to be
-                       re-applied before every capture session)
-
-Run this once before starting pd_live.py:
-    LD_LIBRARY_PATH must include the SDK libs (run_live.sh sets it).
-"""
+"""Configure native 640x480 depth and full-resolution planar RGB over U3V."""
 import ctypes
 import sys
 
@@ -17,10 +7,10 @@ sys.path.insert(0, "/home/HwHiAiUser/Mv3dRgbdSDK/Res/demo/python")
 
 from Mv3dRgbdImport.Mv3dRgbdApi import Mv3dRgbd
 from Mv3dRgbdImport.Mv3dRgbdDefine import (
-    MV3D_RGBD_DEVICE_INFO_LIST, MV3D_RGBD_PARAM, DeviceType_USB, ParamType_Enum, ParamType_Int,
+    MV3D_RGBD_DEVICE_INFO_LIST, MV3D_RGBD_PARAM, DeviceType_USB, ParamType_Enum, ParamType_Int, ParamType_Bool, ParamType_Float,
 )
 
-IMAGE_MODE_COLOUR = 0x8
+IMAGE_MODE_DEPTH = 0x2
 
 
 def main():
@@ -38,20 +28,28 @@ def main():
         print("[camera_setup] open failed 0x%08x" % rc)
         return 1
     try:
-        p = MV3D_RGBD_PARAM(); p.enParamType = ParamType_Enum
-        cam.MV3D_RGBD_GetParam("ImageMode", ctypes.pointer(p))
-        cur = p.ParamInfo.stEnumParam.nCurValue
-        if cur != IMAGE_MODE_COLOUR:
-            p = MV3D_RGBD_PARAM(); p.enParamType = ParamType_Enum
-            p.ParamInfo.stEnumParam.nCurValue = IMAGE_MODE_COLOUR
-            print("[camera_setup] ImageMode -> 0x8 rc=0x%08x"
-                  % cam.MV3D_RGBD_SetParam("ImageMode", ctypes.pointer(p)))
-        p = MV3D_RGBD_PARAM(); p.enParamType = ParamType_Int
-        p.ParamInfo.stIntParam.nCurValue = 1
-        cam.MV3D_RGBD_SetParam("OutputRgbd", ctypes.pointer(p))
-        p = MV3D_RGBD_PARAM(); p.enParamType = ParamType_Int
-        cam.MV3D_RGBD_GetParam("OutputRgbd", ctypes.pointer(p))
-        print("[camera_setup] OutputRgbd = %d" % p.ParamInfo.stIntParam.nCurValue)
+        settings = (
+            ("ImageMode", ParamType_Enum, "stEnumParam", "nCurValue", IMAGE_MODE_DEPTH),
+            ("ImageAlign", ParamType_Int, "stIntParam", "nCurValue", 0),
+            ("OutputRgbd", ParamType_Int, "stIntParam", "nCurValue", 0),
+            ("RGBJpegEnable", ParamType_Bool, None, "bBoolParam", False),
+            ("AcquisitionFrameRate", ParamType_Float, "stFloatParam", "fCurValue", 30),
+        )
+        for key, kind, member, field, value in settings:
+            param = MV3D_RGBD_PARAM()
+            rc = cam.MV3D_RGBD_GetParam(key, ctypes.byref(param))
+            if not rc and key == "ImageAlign" and param.enParamType == ParamType_Enum:
+                kind, member = ParamType_Enum, "stEnumParam"
+            if rc or param.enParamType != kind:
+                print(f"[camera_setup] cannot read {key}: {rc & 0xffffffff:#010x}")
+                return 1
+            holder = getattr(param.ParamInfo, member) if member else param.ParamInfo
+            setattr(holder, field, value)
+            rc = cam.MV3D_RGBD_SetParam(key, ctypes.byref(param))
+            if rc:
+                print(f"[camera_setup] cannot set {key}: {rc & 0xffffffff:#010x}")
+                return 1
+            print(f"[camera_setup] {key} = {value}")
     finally:
         cam.MV3D_RGBD_CloseDevice()
     return 0

@@ -100,8 +100,8 @@ vision_config: depth 27, hidden_size 1152, patch 16, spatial_merge 2, out_hidden
 
 ### 内存/带宽预算（决定最终速度）
 
-- W4A16（INT4 权重 + FP16 激活）总权重约 **19~20GB**（含 fp16 的 embed 2.54GB + lm_head 2.54GB），NPU 可用 23.6GB → **可以塞下但很紧**
-- 310B DDR 实测读带宽 **28.8GB/s** → 每 token 至少读 ~14GB 权重 → **理论上限 ~2 tok/s**，实际预计 **1~1.5 tok/s**
+- W4A16（INT4 权重 + FP16 激活）总权重约 **19–20GB**（含 fp16 的 embed 2.54GB + lm_head 2.54GB），NPU 可用 23.6GB → **可以塞下但很紧**
+- 310B DDR 实测读带宽 **28.8GB/s** → 每 token 至少读 ~14GB 权重 → **理论上限 ~2 tok/s**，实际预计 **1–1.5 tok/s**
 - 这就是 310B 的物理天花板：能跑通 Qwen3.8-27B，但速度是"能出字"级别
 
 ---
@@ -124,7 +124,7 @@ vision_config: depth 27, hidden_size 1152, patch 16, spatial_merge 2, out_hidden
 4. 由此确定架构：
    - **decode（M=1..16）**：融合向量 GEMV kernel（int4 权重在 UB 内反量化 → fp16 → Mul/累加），目标贴近 10.2GB/s；
    - **prefill（M≥16）**：同一 kernel 批处理 M 个 token（权重只读一遍，compute 随 M 线性增长：M=64 时约 22ms/token，仍可接受），或后续再上 Cube 优化；
-   - **MTP 投机解码价值被放大**：一次 forward 验证 K+1 个 token，权重读取量不变 → 理论有效提速≈平均接受长度（预计 1.5~2.5×）。
+   - **MTP 投机解码价值被放大**：一次 forward 验证 K+1 个 token，权重读取量不变 → 理论有效提速≈平均接受长度（预计 1.5–2.5×）。
 
 ### W4A16 权重的反量化布局设计（为向量核优化）
 
@@ -209,7 +209,7 @@ bench_compute:  blocks=1 -> 0.52 ms (64.4 Gelem-ops/s)
 3. `gdn_wy_fast` / `gdn_chunk_h` / `gdn_chunk_o` / `gdn_rgdr`
 4. 16 层全注意力（GQA + 部分 RoPE + mrope + 输出门控）
 5. C++ 引擎：权重加载（int4 分块 + 双缓冲）、层循环、采样 → 端到端 tok/s
-6. **MTP 投机解码**（子代理调研中）：一次 forward 验证 K+1 token，带宽不变 → 预计 1.5~2.5× 提速，是 310B 上唯一有效的加速手段
+6. **MTP 投机解码**（子代理调研中）：一次 forward 验证 K+1 token，带宽不变 → 预计 1.5–2.5× 提速，是 310B 上唯一有效的加速手段
 
 ### 已知待优化项
 
@@ -450,7 +450,7 @@ naive 公式 `(h * k[..., None]).sum(-2)` 展开是 **`Sᵀ·k`**；而我在参
 | 预处理 | causal_conv1d / l2norm / gating / cumsum / gated_rmsnorm | ✅ |
 | chunk 核心 | scaled_dot_kkt / solve_tril / wy_fast / chunk_h / chunk_o | ✅ |
 | decode | **rgdr 递推** | ✅ |
-| GEMM | W4A16 向量 GEMV（2.51GB/s）、Cube Matmul（0.6~1.0 TFLOP/s） | ✅ |
+| GEMM | W4A16 向量 GEMV（2.51GB/s）、Cube Matmul（0.6–1.0 TFLOP/s） | ✅ |
 
 单 token 时间构成（估算）：GEMM 权重流 5.6s + GDN chunk（prefill 用）或 rgdr 5.6ms（decode）+ 注意力/其它。
 
@@ -548,11 +548,11 @@ Cube 实测天花板比之前认为的低得多，**推翻原 prefill 路线图*
 - 独立诊断 `ascend_ops/scripts/probe_tiling.cpp` 打印 tiling：`sM=M, sN=5120, sK=5120, base=128×256×64,
   depthB1=4, stepKa=20` → **B 矩阵按 M/128 个 baseM 块被重复读**（M=1024 时 8×52.4MB）；
 - 试 `SetTraverse(FIRSTN)` / `SetDoubleBuffer` / `SetFixSplit` 均无效（最好仅 +2.6%）→ **高层 Matmul API 无旋钮可修**；
-- 实测 cube 天花板 **M=512: 0.98、M=1024: 1.01、S=1024: 1.46 TFLOP/s = 理论 10 TFLOPS 的 10~15%**。
+- 实测 cube 天花板 **M=512: 0.98、M=1024: 1.01、S=1024: 1.46 TFLOP/s = 理论 10 TFLOPS 的 10–15%**。
 
 **结论修正**：
 - P0「融合反量化」（4.5→0.5 B/param）仍是第一优先（12s→~2.5s/pass）；
-- 但 **P2 从"1.0~1.6×"升级为"手写 matmul 让 cube 从 1.0→4~8 TFLOPS"**，是 P1（M 放大）的前置条件；
+- 但 **P2 从"1.0–1.6×"升级为"手写 matmul 让 cube 从 1.0→4–8 TFLOPS"**，是 P1（M 放大）的前置条件；
 - 若 cube 停在 1.4 TFLOPS，融合路径 prefill 上限 ≈25 tok/s（而非原估 186）。
 
 其它复核确认：单 AI Core（10.2GB/s 与 blockDim 无关）、L2 仅 27GB/s（4MB）、vector 简单 op 134 Gelem-ops/s（85.5% 峰值）、
@@ -679,7 +679,7 @@ L0.ALOG model/language_model/layers/0/linear_attn/A_log.f16.bin 48 f16
 路径与 kind（w4 附 .s/.sz，f16 裸）齐备，引擎可直接按 role 顺序流式加载（避免 host 内存峰值）。
 
 ### 10.11 转换进度
-group-32 转换进行中（每张量 rel-err 0.0000~0.0002，几乎无损）；输出已 6.4GB（最终约 19.3GB）。
+group-32 转换进行中（每张量 rel-err 0.0000–0.0002，几乎无损）；输出已 6.4GB（最终约 19.3GB）。
 
 ### 10.12 ✅ group-32 GEMV 数值通过（2026-11-20 10:00）
 `w4a16_gemv_gen` 修复两个真实 bug 后 **PASS（max_abs 1.953e-3，ref max 11.79）**，stage 1..5 全通过：
@@ -698,7 +698,7 @@ group-32 转换进行中（每张量 rel-err 0.0000~0.0002，几乎无损）；�
 done: 866 tensors, 21.24 GB -> 19.78 GB（vision 已裁剪；含 embed/lm_head fp16、MTP bf16）
 meta.txt: 851 个 tensor 条目（1 个无害 missing：重复的 lm_head 尝试）
 ```
-所有 weight 走 group-32 非对称（每张量 rel-err 0.0000~0.0002）。
+所有 weight 走 group-32 非对称（每张量 rel-err 0.0000–0.0002）。
 按 meta 统计引擎需加载 **20.39GB**（含 MTP 0.85GB；若丢 MTP 则 19.5GB），
 NPU 23.6GB 下剩余 ~3GB 给激活/KV/状态（GDN 状态 151MB + KV 32MB + 激活很小）——**可以塞下**。
 
@@ -725,7 +725,7 @@ NPU 23.6GB 下剩余 ~3GB 给激活/KV/状态（GDN 状态 151MB + KV 32MB + 激
 1. **冒烟子集** `converted/qwen38_smoke`（**537MB**，51 个权重文件全部就位）：
    2 个源层（layer0=GDN、layer3=全注意力）+ 截断到 1024 行的 embed/lm_head + final norm，
    meta.txt 自动改写（n_layers=2, vocab=1024, layer_types=1,0；role 与路径都重映射）。
-   → 板子恢复后 3~5 分钟即可推上，先验证引擎链路（不追求输出语义）。
+   → 板子恢复后 3–5 分钟即可推上，先验证引擎链路（不追求输出语义）。
 2. **引擎修正**（静态 review 发现的两处正确性问题）：
    - `l2norm_op` 增加 `mul` 参数：**q 需要 ×1/√head_dim，k 不能乘**（原来 kernel 对 q/k 都乘了）；
    - **RoPE cos/sin 改为每 token 按位置计算并上传**（原来只在 pos=0 算了一次）。
@@ -741,7 +741,7 @@ NPU 23.6GB 下剩余 ~3GB 给激活/KV/状态（GDN 状态 151MB + KV 32MB + 激
 ### 10.19 ToF 相机任务（用户新任务）
 用户要求：把**海康 ToF SDK** 安装到板子并部署**低延迟方案**，全部放在新建的 `code` 文件夹。
 - 本地资料：`D:\项目4\tof\`（SDK zip `SDK_Mv3dRgbd_Linux_V1.4.1.4_250902.zip`、`_extract/` 头文件与文档、`lowlat/` 既有低延迟方案）
-- 既有方案实测（另一台机器 + MV-DT01SDU）：p50 125ms → **104.3ms（JPEG 彩图使能）**、30.3fps；拆解为"固件流水线 75~80ms + USB/SDK 装配 45ms"
+- 既有方案实测（另一台机器 + MV-DT01SDU）：p50 125ms → **104.3ms（JPEG 彩图使能）**、30.3fps；拆解为"固件流水线 75–80ms + USB/SDK 装配 45ms"
 - 已派子代理 `tof-deploy`：先做本机准备（解压 SDK/确认 aarch64 库/整理 `code/`），板子恢复后安装 SDK + 部署低延迟并实测板子上的延迟/帧率
 - 当前阻塞：**板子仍失联**（需断电重启）
 
@@ -756,7 +756,7 @@ NPU 23.6GB 下剩余 ~3GB 给激活/KV/状态（GDN 状态 151MB + KV 32MB + 激
 [OK] engine_27b
 ```
 这是**全部自研 NPU kernel 串联的真实 Qwen3.8 结构前向**（GDN 线性注意力层 + 全注意力层 + MLP + lm_head + argmax），
-只用 2 层所以 token 无语义；全量 64 层按每层 ~0.2s 估算 ≈ **12~15 s/token**（与 GEMV 0.84GB/s 的预估一致）。
+只用 2 层所以 token 无语义；全量 64 层按每层 ~0.2s 估算 ≈ **12–15 s/token**（与 GEMV 0.84GB/s 的预估一致）。
 
 ### 10.21 打通引擎时修的 5 个真实 bug（都是 UB/对齐类硬限制）
 1. **`rmsnorm_op` H=5120 归约**：折半到 20 个元素（80B 偏移）→ 507015；改为"len%8==0 才折半 + 末段按 8 元素收尾"；
@@ -793,7 +793,7 @@ NPU 23.6GB 下剩余 ~3GB 给激活/KV/状态（GDN 状态 151MB + KV 32MB + 激
 |---|---|---|---|
 | 相机标称 | 133 ms | 30 fps | — |
 | PC + Windows SDK（最好） | 92.7 ms | 30.3 fps | — |
-| 厂商 Linux SDK（板子） | 170~500 ms | 7~14 fps | 单线程 98.5% |
+| 厂商 Linux SDK（板子） | 170–500 ms | 7–14 fps | 单线程 98.5% |
 | **自写开源 U3V 直连（板子）** | **84.9 ms** | **30 fps** | **~4%** |
 - 关键：usbmon 抓包还原厂商 SDK 的完整 U3V 协议序列（含 ABRM 私有布局与 `0x030804=1` AcquisitionStart），
   用 libusb+ctypes 自写最小客户端（`code/lowlat/u3v_lowlat.py`），**不依赖海康 SDK**
@@ -827,10 +827,10 @@ NPU 23.6GB 下剩余 ~3GB 给激活/KV/状态（GDN 状态 151MB + KV 32MB + 激
 | 20 TOPS（标称 INT8 全核理论） | 23.1 ms | 43.3（不可达） |
 | 5 TOPS（用户预算，理论） | 92.4 ms | 10.8 |
 | 单 AI core fp16 峰值（实测 1.46 TFLOPS） | 316 ms | 3.2 |
-| **实测 ViT 有效算力 0.25~0.49 TFLOPS** | **601~726 ms（最小配置，外推）** | **1.4~1.7** |
-关键洞察：ViT 的 LayerNorm/attention 访存密集，本板单核实测有效算力只有 20 TOPS 标签的 **1.25~2.5%**。
-推荐落地方案（清晰度约束）：有效像素原样保留 + 小洞经典多尺度填充（16.5~23.5ms/42~61fps）+ 大洞内部用 DAv2 低频先验
-→ 输出 640×480 原生细节，CPU 填充 ∥ NPU 先验并行约 30~40fps（待板子恢复补精确实测）。
+| **实测 ViT 有效算力 0.25–0.49 TFLOPS** | **601–726 ms（最小配置，外推）** | **1.4–1.7** |
+关键洞察：ViT 的 LayerNorm/attention 访存密集，本板单核实测有效算力只有 20 TOPS 标签的 **1.25–2.5%**。
+推荐落地方案（清晰度约束）：有效像素原样保留 + 小洞经典多尺度填充（16.5–23.5ms/42–61fps）+ 大洞内部用 DAv2 低频先验
+→ 输出 640×480 原生细节，CPU 填充 ∥ NPU 先验并行约 30–40fps（待板子恢复补精确实测）。
 
 ### 10.31 板子自 16:15 起持续离线（第 4 次）
 - 自动恢复脚本持续运行中（每 20s 轮询 + 热点自动重开），日志 `tools/resume.log`
@@ -981,7 +981,7 @@ TOKENS 169571 ×8
 prefill 9 tok in 132.43 s
 decode 8 tok in 117.69 s -> 0.068 tok/s (14.71 s/token)  ✅
 ```
-性能稳定（0.068~0.070 tok/s），但**输出仍退化为单 token 重复** →
+性能稳定（0.068–0.070 tok/s），但**输出仍退化为单 token 重复** →
 说明剩余问题在**多 token 状态演进**（prefill 9 个 token 时 GDN/conv/KV 状态的跨步更新）或跨层维度，
 而单 token、单层的计算已全部对拍正确。
 下一步：① 用 2-token 序列对拍 GDN 层（含状态演进）；② 检查 conv/rgdr 状态是否在 token 间正确传递。
@@ -1024,7 +1024,7 @@ post-attn: corr=0.013              ❌
 
 **但全量 64 层输出仍是片假名 token 重复（169571）**，logits 分布正常（min -4.9 / max 4.9 / mean -0.25）但 top-1 恒定。
 → 层内计算已全部排除；问题在**跨层堆叠**或**参考与引擎共享的某个转换/布局假设**。
-下一步建议：① 用一个 2~4 层的小模型（分层叠加）与全 PC 参考对拍，确认堆叠正确；
+下一步建议：① 用一个 2–4 层的小模型（分层叠加）与全 PC 参考对拍，确认堆叠正确；
 ② 检查 prefill 多 token 时 64 层完整跑通后的 final norm 输入是否合理（dump 最后一层输出）；
 ③ 用更长、更标准的 prompt 验证（当前 prompt 只有 9 token）。
 
@@ -1040,12 +1040,12 @@ post-attn: corr=0.013              ❌
 | **PC 参考（numpy 64 层）** | 475(4.408) 152563(4.375) 108141(4.319) 3414(4.257) 63709(4.085) |
 | **板端引擎（AscendC）** | 475(4.41) 152563(4.38) 108141(4.32) 3414(4.26) 63709(4.09) |
 
-**逐位一致到 0.01~0.03** → 证明：**权重转换正确、27B 模型结构实现正确、AscendC 引擎正确**（含 64 层堆叠）。
+**逐位一致到 0.01–0.03** → 证明：**权重转换正确、27B 模型结构实现正确、AscendC 引擎正确**（含 64 层堆叠）。
 参考层间 |x| mean 演进：0.166 → 4.55(L8) → 8.28(L16) → 10.7(L24) → 12.7(L32) → 13.2(L40) → 13.9(L48) → 13.98(L63)（合理收敛）。
 
 **结论**：模型/转换/引擎三方对拍通过。单 token 推理完全正确。
 剩余问题只在**多 token 生成**：2-token 时 pos=1 的层内计算已验证正确（GDN/注意力都对拍过），但 9-token 时从 pos≥2 起 top-1 变成片假名 token（169571）。
-→ 下一步：写 2~3 token 的**全模型** PC 参考（需要状态演进），对拍 pos=1 的 logits，定位多 token 差异。
+→ 下一步：写 2–3 token 的**全模型** PC 参考（需要状态演进），对拍 pos=1 的 logits，定位多 token 差异。
 
 ### 10.48 ★★ 三方验证全通过 + 发现模型是「Qwen3.5 VL 推理模型」（2026-11-22 14:25）
 

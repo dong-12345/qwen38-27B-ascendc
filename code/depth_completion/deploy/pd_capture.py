@@ -3,7 +3,7 @@
 Frame = 52-byte leader packet, payload chunks, 36-byte trailer packet.
 Payload layout is auto-detected (see decode_payload), covering the two layouts
 observed on this camera:
-  A) 48B header + 640x480 uint16 depth + 1536x1280 BGR888        (6,512,688 B)
+  A) 640x480 uint16 depth + 48B framing + planar RGB           (6,512,688 B)
   B) 48B header + 640x480 uint16 depth + 1536x1280 ??            (6,205,488 B)
 """
 import ctypes
@@ -136,40 +136,34 @@ HDR = 48
 DEPTH_BYTES_2P = 640 * 480 * 2
 RGB_BYTES = 1536 * 1280 * 3
 FRAME_BYTES = HDR + DEPTH_BYTES_2P + RGB_BYTES          # 6,512,688 (HDR / dynamic exposure)
+FRAME_BYTES_COLOR_MODE = 8 + RGB_BYTES + 40 + 1536 * 1280 + DEPTH_BYTES_2P + 8
 FRAME_BYTES_1P = HDR + 307200 + RGB_BYTES                # 6,205,488 (single depth plane)
 
 
 def decode_payload(p, want_bgr=True, small_hw=None):
     """U3V payload -> (depth uint16 480x640, rgb uint8 1280x1536x3 or None).
 
-    Layout (both variants share the planar colour block):
-      48 B header | 2x(320x480 uint16) column-interleaved depth  | 3x(1536x1280 uint8) R,G,B
-    The short variant carries only one depth plane (320x480, half resolution).
+    With want_bgr=False, the recognized planar layouts return RGB as (3, H, W).
     """
     n = int(p.size) if isinstance(p, np.ndarray) else len(p)
     DEPTH_BYTES = 640 * 480 * 2
-    RGB_B = 1536 * 1280 * 3
-    # ---- variant D (colour enabled, IR plane present):
-    #   [header+IR ...][3x1536x1280 planar RGB][640x480 uint16 depth][8 B tail]
-    # depth sits at the very end, colour right before it - size independent
-    if n > DEPTH_BYTES + 8:
-        dep_end = n - 8
-        dep_start = dep_end - DEPTH_BYTES
-        d = np.frombuffer(p[dep_start:dep_end], dtype=np.uint16).reshape(480, 640).copy()
-        v = d[d > 0]
-        if v.size > 0 and 300 < float(np.median(v)) < 20000:
-            # layout: [R G B][IR plane][depth] - the IR plane sits *between*
-            # the colour block and the depth plane, so colour starts one more
-            # plane further back (verified by eye against the IR-free variant)
-            c_start = dep_start - RGB_B - (1536 * 1280 if dep_start - RGB_B - 1536 * 1280 >= 0 else 0)
-            if c_start >= 0:
-                cb = np.frombuffer(p, np.uint8, count=RGB_B, offset=c_start).reshape(3, 1280, 1536)
-                if small_hw is not None:
-                    h2, w2 = small_hw
-                    ps = [cv2.resize(cb[k], (w2, h2), interpolation=cv2.INTER_LINEAR) for k in range(3)]
-                    return d, cv2.cvtColor(cv2.merge(ps), cv2.COLOR_RGB2BGR)
-                return d, cv2.cvtColor(cv2.merge([cb[0], cb[1], cb[2]]), cv2.COLOR_RGB2BGR)
-            return d, None
+    if n == FRAME_BYTES:
+        depth = np.frombuffer(p, "<u2", count=640 * 480).reshape(DEPTH_SHAPE).copy()
+        rgb_offset = DEPTH_BYTES_2P + 48
+    elif n == FRAME_BYTES_COLOR_MODE:
+        depth_offset = n - 8 - DEPTH_BYTES_2P
+        depth = np.frombuffer(p, "<u2", count=640 * 480, offset=depth_offset).reshape(DEPTH_SHAPE).copy()
+        rgb_offset = 8
+    else:
+        rgb_offset = None
+    if rgb_offset is not None:
+        planes = np.frombuffer(p, np.uint8, count=RGB_BYTES, offset=rgb_offset).reshape(3, *RGB_SHAPE)
+        if small_hw is not None:
+            h, w = small_hw
+            planes = [cv2.resize(channel, (w, h), interpolation=cv2.INTER_LINEAR) for channel in planes]
+        if want_bgr:
+            return depth, cv2.merge((planes[2], planes[1], planes[0]))
+        return depth, np.asarray(planes)
     # depth-only stream (colour disabled on the camera): 640x480 uint16 + 8 B tail
     if DEPTH_BYTES <= n <= DEPTH_BYTES + 4096:
         d = np.frombuffer(p, dtype=np.uint16, count=640 * 480).reshape(480, 640).copy()

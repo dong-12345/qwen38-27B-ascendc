@@ -152,7 +152,7 @@ ENG27_GEN=8 ./src/out/bin/qwen38_ops_test engine_27b
 - **单 token 吞吐低**：310B 单核向量 GEMV，14.5 s/token；不适合交互式场景。
 - **不含 MTP 模块、不含视觉/音频塔**。
 - **fp16 激活**：与上游 bf16 训练有细微数值差异（实测 logits 与独立 fp32 参考一致到 1e-2）。
-- `embed_tokens` / `lm_head` 也做了 4bit 重量化（误差 0.0000~0.0002，可忽略）。
+- `embed_tokens` / `lm_head` 也做了 4bit 重量化（误差 0.0000–0.0002，可忽略）。
 
 ## 6. 许可与合规（Apache-2.0）
 
