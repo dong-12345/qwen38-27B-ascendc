@@ -97,6 +97,7 @@ class U3V:
         ctypes buffer directly holds the GIL long enough to stall the pipeline.
         """
         cur = None
+        single_sz = 0
         stats = {"chunks": 0, "resets": 0}
         while True:
             n = ctypes.c_int(0)
@@ -106,14 +107,26 @@ class U3V:
             sz = n.value
             if sz == 52:                      # leader
                 cur = None
+                single_sz = 0
                 stats["resets"] += 1
                 continue
             if sz == 36:                      # trailer
+                if single_sz > 100000:
+                    # whole payload arrived in one transfer: hand back a *view*
+                    # of the usb buffer (no 8.5 MB copy).  The caller must decode
+                    # before the next read_payload() call.
+                    return np.frombuffer(self.buf, dtype=np.uint8, count=single_sz), stats
                 if cur is not None and len(cur) > 100000:
                     return cur, stats
                 continue
-            chunk = np.frombuffer(self.buf, dtype=np.uint8, count=sz).tobytes()
-            cur = chunk if cur is None else cur + chunk
+            if cur is None and single_sz == 0:
+                single_sz = sz
+            else:
+                if single_sz:
+                    cur = np.frombuffer(self.buf, dtype=np.uint8, count=single_sz).tobytes()
+                    single_sz = 0
+                chunk = np.frombuffer(self.buf, dtype=np.uint8, count=sz).tobytes()
+                cur = chunk if cur is None else cur + chunk
             stats["chunks"] += 1
 
 # ---------------------------------------------------------------- payload decode
@@ -131,7 +144,7 @@ def decode_payload(p, want_bgr=True, small_hw=None):
       48 B header | 2x(320x480 uint16) column-interleaved depth  | 3x(1536x1280 uint8) R,G,B
     The short variant carries only one depth plane (320x480, half resolution).
     """
-    n = len(p)
+    n = int(p.size) if isinstance(p, np.ndarray) else len(p)
     DEPTH_BYTES = 640 * 480 * 2
     RGB_B = 1536 * 1280 * 3
     # ---- variant D (colour enabled, IR plane present):
@@ -143,11 +156,15 @@ def decode_payload(p, want_bgr=True, small_hw=None):
         d = np.frombuffer(p[dep_start:dep_end], dtype=np.uint16).reshape(480, 640).copy()
         v = d[d > 0]
         if v.size > 0 and 300 < float(np.median(v)) < 20000:
-            if dep_start - RGB_B >= 0:
-                cb = np.frombuffer(p, np.uint8, count=RGB_B, offset=dep_start - RGB_B).reshape(3, 1280, 1536)
+            # layout: [R G B][IR plane][depth] - the IR plane sits *between*
+            # the colour block and the depth plane, so colour starts one more
+            # plane further back (verified by eye against the IR-free variant)
+            c_start = dep_start - RGB_B - (1536 * 1280 if dep_start - RGB_B - 1536 * 1280 >= 0 else 0)
+            if c_start >= 0:
+                cb = np.frombuffer(p, np.uint8, count=RGB_B, offset=c_start).reshape(3, 1280, 1536)
                 if small_hw is not None:
                     h2, w2 = small_hw
-                    ps = [cv2.resize(cb[k], (w2, h2), interpolation=cv2.INTER_AREA) for k in range(3)]
+                    ps = [cv2.resize(cb[k], (w2, h2), interpolation=cv2.INTER_LINEAR) for k in range(3)]
                     return d, cv2.cvtColor(cv2.merge(ps), cv2.COLOR_RGB2BGR)
                 return d, cv2.cvtColor(cv2.merge([cb[0], cb[1], cb[2]]), cv2.COLOR_RGB2BGR)
             return d, None
@@ -194,7 +211,7 @@ def decode_payload(p, want_bgr=True, small_hw=None):
         # resize each colour plane straight to the target size: avoids the
         # 1536x1280 stack + cvtColor + resize (~29 ms -> ~10 ms)
         h2, w2 = small_hw
-        ps = [cv2.resize(planes[i], (w2, h2), interpolation=cv2.INTER_AREA) for i in range(3)]
+        ps = [cv2.resize(planes[i], (w2, h2), interpolation=cv2.INTER_LINEAR) for i in range(3)]
         small = cv2.merge(ps)
         return d, cv2.cvtColor(small, cv2.COLOR_RGB2BGR)
     rgb = np.stack([planes[0], planes[1], planes[2]], axis=2)

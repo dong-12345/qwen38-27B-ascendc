@@ -182,3 +182,49 @@ scp -i D:/项目4/orangepi_aipro/tools/opi_key HwHiAiUser@192.168.137.163:/tmp/r
 | 2026-11-22 16:40 | Foxglove 手写服务端打通（修掉 MessageData 漏 1 字节的 bug） |
 | 2026-11-22 17:00 | 按用户要求**放弃所有学习模型**，改纯 CPU 传统算法；模型权重/代码/结果全部删除 |
 | 2026-11-22 17:10 | 软权重替换 + 固定色标建议；本文档成稿 |
+
+---
+
+## 11. 相机 RGBD 配置（2026-11-22 19:00 补充，重要）
+
+### 11.1 彩图为什么老是丢
+相机要同时出「深度 + 彩色 + 红外」三个平面，需要两个条件，其中一个是**易失参数**：
+
+| 参数 | 值 | 说明 |
+|---|---|---|
+| `ImageMode` | `0x8` | 彩色模式；设完 `PixelFormat` 会自动变成 `RGB8_Planar (0x2180021)` |
+| `OutputRgbd` | `1` | 额外输出深度平面。**SDK 一关就回 0**，必须每次采集前重设 |
+
+`deploy/camera_setup.py` 干的就是这件事，`run_live.sh` 每次启动都会先跑它，所以不用手工干预。
+
+### 11.2 payload 布局（8,478,776 B，用肉眼对过）
+
+```
+[R 平面 1,966,080][G 平面][B 平面][红外平面 1,966,080][深度 614,400][8 B 尾]
+```
+
+**坑**：彩色块在最后 3 个平面之前还要再往前退一个平面（红外夹在彩色和深度之间）。按 `[红外][RGB][深度]` 解会整块错位，画面变成黄绿底 + 顶部蓝带。
+正确的起点是 `dep_start - 4 * (1536*1280)`。
+
+### 11.3 三种 payload 与帧率
+
+| 模式 | payload | 纯读包 | 流水线 |
+|---|---|---|---|
+| 纯深度 | 614,408 B | 29.8 fps | 23.9 fps |
+| 深度 + 彩色 + 红外（当前） | 8,478,776 B | 20.3 fps | **9.8 fps** |
+
+红外平面占 1.97 MB 但完全用不到，是浪费；相机设置里暂时没找到关掉它的开关。
+
+### 11.4 SDK 用法（板端）
+
+```bash
+export LD_LIBRARY_PATH=$HOME/Mv3dRgbdSDK/Libs/aarch64:$HOME/Mv3dRgbdSDK/MVCC/Libs/aarch64:$HOME/Mv3dRgbdSDK/MVCC/Libs/arm-none:$LD_LIBRARY_PATH
+python3 deploy/camera_setup.py
+```
+
+注意：SDK 打开设备时我方 U3V 必须已释放（同一时刻只能一个进程占用相机）。
+
+### 11.5 USB 稳定性
+- 相机经 Genesys Logic hub 时**反复掉线**（几秒内连上又掉），直插板载 USB3 口后正常。
+- `/etc/udev/rules.d/99-tof-u3v.rules` 原来是个空文件，导致重新枚举后设备节点权限变回 root，已写入：
+  `SUBSYSTEM=="usb", ATTR{idVendor}=="2bdf", MODE="0666", TAG+="uaccess"`

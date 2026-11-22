@@ -22,6 +22,7 @@ cv2.setNumThreads(1)
 
 import foxglove_ws as FW
 import pd_core as C
+import pd_publish
 from pd_capture import U3V, decode_payload
 
 FRAME_ID = "rgb"
@@ -34,6 +35,7 @@ class Grabber(threading.Thread):
         super().__init__(daemon=True)
         self.lock = threading.Lock()
         self.frame = None
+        self.times = None
         self.count = 0
         self.bad = 0
         self.running = False
@@ -46,7 +48,9 @@ class Grabber(threading.Thread):
         t_log = time.perf_counter()
         n_log = 0
         while self.running:
+            t_r0 = time.time()
             p, st = u.read_payload(1500)
+            t_r1 = time.time()
             if p is None:
                 self.bad += 1
                 continue
@@ -55,8 +59,10 @@ class Grabber(threading.Thread):
                 self.bad += 1
                 continue
             rgb640 = rgb          # None when the camera streams depth only
+            t_d = time.time()
             with self.lock:
-                self.frame = (time.time(), dep, rgb640)   # colour already downscaled
+                self.frame = (t_d, dep, rgb640)   # colour already downscaled
+                self.times = (t_r0, t_r1, t_d)
             self.count += 1
             n_log += 1
             if n_log >= 60:
@@ -170,26 +176,14 @@ def main():
     ap.add_argument("--jpeg-q", type=int, default=80)
     ap.add_argument("--no-fill", action="store_true", help="publish the raw ToF (no completion)")
     ap.add_argument("--depth16", action="store_true", help="also publish /depth/depth16 (16-bit PNG)")
+    ap.add_argument("--single-proc", action="store_true",
+                    help="publish from this process instead of a child process")
     ap.add_argument("--temporal", type=float, default=0.0, help="temporal EMA weight (0=off = sharpest)")
     ap.add_argument("--regions", action="store_true",
                     help="replace temporally unstable areas with a smooth surface (denoise, blurs)")
     ap.add_argument("--save-dir", default="")
     ap.add_argument("--seconds-only", action="store_true", help=argparse.SUPPRESS)
     args = ap.parse_args()
-
-    srv = FW.FoxgloveServer(port=args.port)
-    chans = {
-        "rgb": srv.add_channel("/camera/rgb", "foxglove.CompressedImage", FW.COMPRESSED_IMAGE_SCHEMA,
-                               encoding="json"),
-        "col": srv.add_channel("/depth/colored", "foxglove.CompressedImage", FW.COMPRESSED_IMAGE_SCHEMA,
-                               encoding="json"),
-        "pc": srv.add_channel("/points", "foxglove.PointCloud", FW.POINTCLOUD_PROTO),
-    }
-    if args.depth16:
-        chans["dep"] = srv.add_channel("/depth/depth16", "foxglove.CompressedImage",
-                                       FW.COMPRESSED_IMAGE_SCHEMA, encoding="json")
-    srv.start()
-    print("[ws] ws://0.0.0.0:%d  topics: %s" % (args.port, ", ".join(c.topic for c in chans.values())), flush=True)
 
     intr = (507.604, 507.702, 326.961, 243.043)
     calib_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "results", "rgbd_calib.json")
@@ -200,9 +194,33 @@ def main():
         except Exception:
             pass
 
-    pub = Publisher(srv, chans, args.depth_every, args.jpeg_q,
-                    args.cloud_every, args.cloud_stride, intr)
-    pub.start()
+    # ---- three-stage pipeline: this process captures, two child processes
+    # do the completion and the publishing (shared memory ping-pong buffers)
+    import multiprocessing as mp
+    from multiprocessing import shared_memory
+    import pd_publish
+    import pd_complete
+
+    shms = {"rgb": [], "raw": [], "out": []}
+    for k, sz in (("rgb", 640 * 480 * 3), ("raw", 640 * 480 * 2), ("out", 640 * 480 * 2)):
+        for _ in range(2):
+            shms[k].append(shared_memory.SharedMemory(create=True, size=sz))
+    meta = mp.RawArray("d", 8)     # 0 stop, 1 gain, 2 raw counter, 3 done counter, 4/5 ts, 6 proc ms
+    rgb_views = [np.ndarray((480, 640, 3), dtype=np.uint8, buffer=s.buf) for s in shms["rgb"]]
+    raw_views = [np.ndarray((480, 640), dtype=np.uint16, buffer=s.buf) for s in shms["raw"]]
+
+    proc_c = mp.Process(target=pd_complete.run,
+                        args=([s.name for s in shms["rgb"]], [s.name for s in shms["raw"]],
+                              [s.name for s in shms["out"]], meta,
+                              args.temporal, args.regions, 3, 180.0), daemon=True)
+    proc_c.start()
+    proc_p = mp.Process(target=pd_publish.run,
+                        args=([s.name for s in shms["rgb"]], [s.name for s in shms["out"]],
+                              meta, args.port, args.depth_every, args.cloud_every,
+                              args.cloud_stride, args.jpeg_q, intr), daemon=True)
+    proc_p.start()
+    print("[main] capture pid=%d  complete pid=%d  publish pid=%d"
+          % (os.getpid(), proc_c.pid, proc_p.pid), flush=True)
 
     comp = None if args.no_fill else C.ClassicCompleter(temporal=args.temporal, regions=args.regions)
     ae = C.AutoExposure(target=110.0)
@@ -215,6 +233,7 @@ def main():
         os.makedirs(args.save_dir, exist_ok=True)
 
     lat, t_start, last_key, n, saved = [], time.time(), None, 0, 0
+    usb_us, wait_us, total_us = [], [], []
     try:
         while True:
             if args.seconds and time.time() - t_start > args.seconds:
@@ -225,18 +244,27 @@ def main():
                 continue
             last_key = fr[0]
             ts, dep_mm, rgb = fr
+            t_pick = time.time()
             t0 = time.perf_counter()
-            if comp is not None:
-                dep_out = comp(dep_mm, rgb)
-            else:
-                dep_out = dep_mm
             dt = (time.perf_counter() - t0) * 1e3
             lat.append(dt)
+            tr = g.times
+            if tr is not None:
+                usb_us.append((tr[1] - tr[0]) * 1e3)
+                wait_us.append((t_pick - tr[1]) * 1e3)
+                total_us.append((time.time() - tr[0]) * 1e3)
             n += 1
             gain = ae.gain
             if rgb is not None:
                 ae.update(float(cv2.cvtColor(rgb, cv2.COLOR_BGR2GRAY).mean()))
-            pub.submit(ts, rgb, np.ascontiguousarray(dep_out), gain)
+            c_new = int(meta[2]) + 1
+            slot = c_new % 2
+            if rgb is not None:
+                rgb_views[slot][:] = rgb
+            raw_views[slot][:] = dep_mm
+            meta[4 + slot] = ts
+            meta[1] = gain
+            meta[2] = float(c_new)
             if args.save_dir and saved < 4:
                 np.save(os.path.join(args.save_dir, "tof.npy"), dep_mm)
                 np.save(os.path.join(args.save_dir, "filled.npy"), dep_out)
@@ -244,26 +272,38 @@ def main():
                 saved += 1
             if n % 60 == 0:
                 el = time.time() - t_start
-                print("[run] n=%d %.1f fps  proc p50=%.1f ms  e2e p50=%.0f ms  cap=%.1f fps bad=%d"
-                      % (n, n / el, float(np.median(lat[-60:])),
-                         float(np.median(pub.lat[-60:])) if pub.lat else -1,
-                         g.count / el, g.bad), flush=True)
+                print("[run] n=%d %.1f fps  proc p50=%.1f ms  cap=%.1f fps bad=%d"
+                      % (n, n / el, float(np.median(lat[-60:])), g.count / el, g.bad), flush=True)
+                if total_us:
+                    print("   [lat] usb %.1f ms + wait %.1f ms + proc %.1f ms = "
+                          "capture->done %.1f ms (p50)"
+                          % (np.median(usb_us[-60:]), np.median(wait_us[-60:]),
+                             float(np.median(lat[-60:])), np.median(total_us[-60:])), flush=True)
     except KeyboardInterrupt:
         pass
     finally:
         g.stop()
-        pub.stop()
-        srv.close()
+        meta[0] = 1.0
+        for pr in (proc_c, proc_p):
+            pr.join(timeout=3)
+            if pr.is_alive():
+                pr.terminate()
+        for lst in shms.values():
+            for s in lst:
+                try:
+                    s.close()
+                    s.unlink()
+                except Exception:
+                    pass
         el = time.time() - t_start
         print("RESULT " + json.dumps({
             "frames": n, "seconds": round(el, 2), "fps": round(n / el, 2),
             "proc_p50_ms": round(float(np.median(lat)), 2) if lat else None,
             "proc_p95_ms": round(float(np.percentile(lat, 95)), 2) if lat else None,
             "capture_fps": round(g.count / el, 2), "bad_frames": g.bad,
-            "encode_ms": round(pub.ms_encode, 2), "published": pub.n,
-            "e2e_lat_p50_ms": round(float(np.median(pub.lat[-120:])), 1) if pub.lat else None,
-            "e2e_lat_p95_ms": round(float(np.percentile(pub.lat[-120:], 95)), 1) if pub.lat else None,
-            "clouds": pub.n_cloud, "depth16": pub.n_depth,
+            "encode_ms": None, "published": None,
+            "e2e_lat_p50_ms": None, "e2e_lat_p95_ms": None,
+            "clouds": None, "depth16": None,
         }), flush=True)
         sys.stdout.flush()
         os._exit(0)
