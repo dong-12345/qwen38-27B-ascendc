@@ -174,3 +174,22 @@ Apache-2.0 **允许再分发与修改**，但需履行以下义务（本仓库�
 - 基础模型与架构：Qwen 团队（Qwen3.5）
 - AscendC 算子与引擎：本项目
 - 参考实现：`transformers` 的 `modeling_qwen3_5.py`（用于对齐 1-centered RMSNorm、per-head q/gate 布局、sigmoid 输出门）
+
+---
+
+## 9. 发布到 HuggingFace（中国大陆网络注意）
+
+直接上传 `huggingface.co` 常因 Xet 通道（`xet-write-token` / `cas-server.xethub.hf.co`）被阻断而失败。
+实测可用的组合（上传 42.5 MB LFS 文件 16.2 秒 ≈ 2.6 MB/s）：
+
+```powershell
+$env:HF_ENDPOINT="https://hf-mirror.com"   # 走镜像
+$env:HF_HUB_DISABLE_XET="1"                # 关闭 Xet，退回经典 LFS
+hf upload <用户名>/Qwen3.8-27B-AscendC-W4A16 converted\qwen38_310b .
+```
+
+- 登录：`hf auth login`（浏览器 device flow：打开 hf.co/oauth/device 输入验证码）
+- 断点续传：按批次提交，中断后重跑同一命令即可，已上传的文件按哈希跳过
+- 仓库根目录布局必须保持 `meta.txt` / `model/` / `lm_head/` 层级（引擎按 `meta.txt` 里的相对路径读取）
+
+本文档由 `python tools/push_to_hf.py` 之外的手动流程验证；脚本内 `upload_large_folder` 走 Xet，国内网络建议直接用上面的 `hf upload` 命令。
