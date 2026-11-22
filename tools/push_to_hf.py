@@ -5,7 +5,7 @@
     pip install huggingface_hub
     export HF_TOKEN=hf_xxx
     python tools/push_to_hf.py --folder converted/qwen38_310b \
-        --repo your-name/Qwen3_8-27B-AscendC-W4A16 [--private] [--dry-run]
+        --repo <YOUR_USER>/Qwen3.8-27B-AscendC-W4A16 [--private] [--dry-run]
 
 说明：
   - 权重目录约 16.9 GB / 1670 个文件，`upload_folder` 支持断点续传，中断后重跑即可。
@@ -20,7 +20,7 @@ import sys
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--folder", required=True, help="本地权重目录（如 converted/qwen38_310b）")
-    ap.add_argument("--repo", required=True, help="目标仓库 id，如 your-name/Qwen3_8-27B-AscendC-W4A16")
+    ap.add_argument("--repo", required=True, help="目标仓库 id，如 <YOUR_USER>/Qwen3.8-27B-AscendC-W4A16")
     ap.add_argument("--private", action="store_true", help="创建为私有仓库")
     ap.add_argument("--revision", default="main")
     ap.add_argument("--model-card", default="docs/MODEL_CARD_HF.md")

@@ -132,10 +132,28 @@ def decode_payload(p, want_bgr=True, small_hw=None):
     The short variant carries only one depth plane (320x480, half resolution).
     """
     n = len(p)
+    DEPTH_BYTES = 640 * 480 * 2
     # depth-only stream (colour disabled on the camera): 640x480 uint16 + 8 B tail
-    if 640 * 480 * 2 <= n <= 640 * 480 * 2 + 4096:
+    if DEPTH_BYTES <= n <= DEPTH_BYTES + 4096:
         d = np.frombuffer(p, dtype=np.uint16, count=640 * 480).reshape(480, 640).copy()
         return d, None
+    # depth + JPEG colour: the colour block is a JPEG stream somewhere after the
+    # depth plane (sizes are variable, so locate it by its SOI/EOI markers)
+    if n > DEPTH_BYTES + 1024:
+        i = p.rfind(b"\xff\xd8\xff")
+        j = p.rfind(b"\xff\xd9")
+        if i > 0 and j > i:
+            dblk = p[max(0, i - DEPTH_BYTES):i]
+            if len(dblk) >= DEPTH_BYTES:
+                d = np.frombuffer(dblk[-DEPTH_BYTES:], dtype=np.uint16).reshape(480, 640).copy()
+                v = d[d > 0]
+                if v.size > 0 and 100 < float(np.median(v)) < 20000:
+                    img = cv2.imdecode(np.frombuffer(p[i:j + 2], dtype=np.uint8), cv2.IMREAD_COLOR)
+                    if img is not None:
+                        if small_hw is not None:
+                            h2, w2 = small_hw
+                            img = cv2.resize(img, (w2, h2), interpolation=cv2.INTER_AREA)
+                        return d, img
     if not (FRAME_BYTES_1P - 2048 <= n <= FRAME_BYTES + 40960):
         return None, None
     cblk = np.frombuffer(p, dtype=np.uint8, count=RGB_BYTES, offset=n - RGB_BYTES)

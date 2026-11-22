@@ -1,5 +1,8 @@
 # Qwen3.8-27B (Qwen3.5 hybrid GDN) 在 OrangePi AI Pro 20T / Ascend 310B 上的自研 AscendC 推理栈
 
+[![GitHub](https://img.shields.io/badge/GitHub-qwen38-ascendc-black)](https://github.com/<YOUR_USER>/qwen38-ascendc)
+[![HuggingFace](https://img.shields.io/badge/&#129303;-Qwen3.8--27B--AscendC--W4A16-yellow)](https://huggingface.co/<YOUR_USER>/Qwen3.8-27B-AscendC-W4A16)
+
 在 **OrangePi AI Pro 20T（Ascend 310B1，CANN 8.0.0，23GB 内存，~1.46 TFLOPS Cube）** 上，
 用**纯 AscendC 手写算子 + 自研推理引擎**跑通 **Qwen3.8-27B（28B 参数，4bit 量化，48 层 Gated DeltaNet + 16 层全注意力）**，
 输出语义正确，实测 **0.069 tok/s（≈14.5 s/token）**。
