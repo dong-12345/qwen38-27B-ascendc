@@ -133,6 +133,24 @@ def decode_payload(p, want_bgr=True, small_hw=None):
     """
     n = len(p)
     DEPTH_BYTES = 640 * 480 * 2
+    RGB_B = 1536 * 1280 * 3
+    # ---- variant D (colour enabled, IR plane present):
+    #   [header+IR ...][3x1536x1280 planar RGB][640x480 uint16 depth][8 B tail]
+    # depth sits at the very end, colour right before it - size independent
+    if n > DEPTH_BYTES + 8:
+        dep_end = n - 8
+        dep_start = dep_end - DEPTH_BYTES
+        d = np.frombuffer(p[dep_start:dep_end], dtype=np.uint16).reshape(480, 640).copy()
+        v = d[d > 0]
+        if v.size > 0 and 300 < float(np.median(v)) < 20000:
+            if dep_start - RGB_B >= 0:
+                cb = np.frombuffer(p, np.uint8, count=RGB_B, offset=dep_start - RGB_B).reshape(3, 1280, 1536)
+                if small_hw is not None:
+                    h2, w2 = small_hw
+                    ps = [cv2.resize(cb[k], (w2, h2), interpolation=cv2.INTER_AREA) for k in range(3)]
+                    return d, cv2.cvtColor(cv2.merge(ps), cv2.COLOR_RGB2BGR)
+                return d, cv2.cvtColor(cv2.merge([cb[0], cb[1], cb[2]]), cv2.COLOR_RGB2BGR)
+            return d, None
     # depth-only stream (colour disabled on the camera): 640x480 uint16 + 8 B tail
     if DEPTH_BYTES <= n <= DEPTH_BYTES + 4096:
         d = np.frombuffer(p, dtype=np.uint16, count=640 * 480).reshape(480, 640).copy()
