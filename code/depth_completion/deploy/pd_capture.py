@@ -35,6 +35,7 @@ class U3V:
         self.pid = 0
         self.h = None
         self.buf = (ctypes.c_ubyte * (8 << 20))()
+        self.bufs = [self.buf] + [(ctypes.c_ubyte * (8 << 20))() for _ in range(2)]
 
     def err(self, rc):
         return self.lib.libusb_error_name(rc).decode()
@@ -96,38 +97,39 @@ class U3V:
         Copies through numpy (releases the GIL for the bulk memcpy); slicing the
         ctypes buffer directly holds the GIL long enough to stall the pipeline.
         """
-        cur = None
-        single_sz = 0
+        chunks = []          # (buffer index, size) in arrival order
         stats = {"chunks": 0, "resets": 0}
+        slot = 0
         while True:
+            buf = self.bufs[slot]
             n = ctypes.c_int(0)
-            rc = self.lib.libusb_bulk_transfer(self.h, EP_STREAM, self.buf, 8 << 20, ctypes.byref(n), timeout_ms)
+            rc = self.lib.libusb_bulk_transfer(self.h, EP_STREAM, buf, 8 << 20, ctypes.byref(n), timeout_ms)
             if rc != 0:
                 return None, stats
             sz = n.value
-            if sz == 52:                      # leader
-                cur = None
-                single_sz = 0
+            if sz == 52:                      # leader -> new frame
+                chunks = []
                 stats["resets"] += 1
+                slot = (slot + 1) % len(self.bufs)
                 continue
-            if sz == 36:                      # trailer
-                if single_sz > 100000:
-                    # whole payload arrived in one transfer: hand back a *view*
-                    # of the usb buffer (no 8.5 MB copy).  The caller must decode
-                    # before the next read_payload() call.
-                    return np.frombuffer(self.buf, dtype=np.uint8, count=single_sz), stats
-                if cur is not None and len(cur) > 100000:
-                    return cur, stats
+            if sz == 36:                      # trailer -> frame complete
+                if len(chunks) == 1:
+                    idx, csz = chunks[0]
+                    if csz > 100000:
+                        # single transfer: hand back a *view* (no big copy); the
+                        # caller must decode before the next read_payload()
+                        return np.frombuffer(self.bufs[idx], dtype=np.uint8, count=csz), stats
+                elif chunks and sum(c[1] for c in chunks) > 100000:
+                    parts = [np.frombuffer(self.bufs[i], dtype=np.uint8, count=s).tobytes()
+                             for i, s in chunks]
+                    return b"".join(parts), stats
+                chunks = []
+                slot = (slot + 1) % len(self.bufs)
                 continue
-            if cur is None and single_sz == 0:
-                single_sz = sz
-            else:
-                if single_sz:
-                    cur = np.frombuffer(self.buf, dtype=np.uint8, count=single_sz).tobytes()
-                    single_sz = 0
-                chunk = np.frombuffer(self.buf, dtype=np.uint8, count=sz).tobytes()
-                cur = chunk if cur is None else cur + chunk
+            chunks.append((slot, sz))
             stats["chunks"] += 1
+            slot = (slot + 1) % len(self.bufs)
+
 
 # ---------------------------------------------------------------- payload decode
 HDR = 48
@@ -175,6 +177,9 @@ def decode_payload(p, want_bgr=True, small_hw=None):
     # depth + JPEG colour: the colour block is a JPEG stream somewhere after the
     # depth plane (sizes are variable, so locate it by its SOI/EOI markers)
     if n > DEPTH_BYTES + 1024:
+        if not isinstance(p, (bytes, bytearray)):
+            p = p.tobytes()          # the marker search needs a bytes object
+            n = len(p)
         i = p.rfind(b"\xff\xd8\xff")
         j = p.rfind(b"\xff\xd9")
         if i > 0 and j > i:

@@ -54,14 +54,9 @@ class Grabber(threading.Thread):
             if p is None:
                 self.bad += 1
                 continue
-            dep, rgb = decode_payload(p, small_hw=(480, 640))
-            if dep is None or float((dep > 0).mean()) < 0.02:
-                self.bad += 1
-                continue
-            rgb640 = rgb          # None when the camera streams depth only
             t_d = time.time()
             with self.lock:
-                self.frame = (t_d, dep, rgb640)   # colour already downscaled
+                self.frame = (t_d, p)   # raw payload view; decoded in the main loop
                 self.times = (t_r0, t_r1, t_d)
             self.count += 1
             n_log += 1
@@ -243,8 +238,11 @@ def main():
                 time.sleep(0.001)
                 continue
             last_key = fr[0]
-            ts, dep_mm, rgb = fr
+            ts, payload = fr
             t_pick = time.time()
+            dep_mm, rgb = decode_payload(payload, small_hw=(480, 640))
+            if dep_mm is None or float((dep_mm > 0).mean()) < 0.02:
+                continue
             t0 = time.perf_counter()
             dt = (time.perf_counter() - t0) * 1e3
             lat.append(dt)

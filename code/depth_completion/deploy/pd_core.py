@@ -347,51 +347,29 @@ class ClassicCompleter:
             out = tof_mm.copy()
         valid = out > 0
         self.hole_frac = float((~valid).mean())
-        if self.hole_frac >= 0.005 or self.regions:
+        if valid.all():
+            out = out
+        else:
             d = out.astype(np.float32)
             h, w = d.shape
-            prior = self._prior(d, valid) if self.regions else None
-            if self.regions and self.prev is not None and self.prev.shape == d.shape:
-                bh, bw = max(1, h // 8), max(1, w // 8)
-                d_s = cv2.resize(d, (bw, bh), interpolation=cv2.INTER_AREA)
-                p_s = cv2.resize(self.prev, (bw, bh), interpolation=cv2.INTER_AREA)
-                diff_s = cv2.absdiff(d_s, p_s)
-                if self.unstable is None:
-                    self.unstable = np.zeros((bh, bw), np.float32)
-                self.unstable = 0.7 * self.unstable + 0.3 * (diff_s > self.diff_mm).astype(np.float32)
-                lo = self.unstable_th * 0.6
-                hi = max(self.unstable_th, lo + 1e-3)
-                wgt = np.clip((self.unstable - lo) / (hi - lo), 0.0, 1.0).astype(np.float32)
-                self.region_frac = float((wgt > 0.5).mean())
-                if wgt.max() > 0.05:
-                    wf = cv2.resize(wgt, (w, h), interpolation=cv2.INTER_LINEAR)
-                    wf = cv2.dilate(wf, np.ones((7, 7), np.float32))
-                    d = d * (1.0 - wf) + prior * wf
-                    valid = (d > 0) & (valid | (wf > 0.5))
-            if not valid.all():
-                # do the whole fill at 1/div resolution: one downscale, one
-                # upscale (this is the cheapest correct way to fill thin holes)
-                dv = max(2, int(self.div))
-                sw, sh = max(1, w // dv), max(1, h // dv)
-                d_s = cv2.resize(np.where(valid, d, 0.0), (sw, sh), interpolation=cv2.INTER_AREA)
-                m_s = cv2.resize(valid.astype(np.float32), (sw, sh), interpolation=cv2.INTER_AREA)
-                p_s = d_s / np.maximum(m_s, 1e-3)
-                p_s = cv2.blur(p_s, (3, 3))
-                empty = m_s < 1e-3
-                if empty.any():
-                    med = float(d[valid].mean()) if valid.any() else 0.0
-                    p_s = np.where(empty, med if med > 0 else float(p_s.mean()), p_s)
-                if rgb640 is not None:
-                    gray = cv2.cvtColor(rgb640, cv2.COLOR_BGR2GRAY)
-                    g_s = cv2.resize(gray, (sw, sh), interpolation=cv2.INTER_AREA).astype(np.float32)
-                    f_s = guided_filter_gray(g_s, p_s.astype(np.float32), self.radius, self.eps)
-                else:
-                    # no colour frame (depth-only stream): plain smooth prior
-                    f_s = cv2.blur(p_s.astype(np.float32), (3, 3))
-                filled = cv2.resize(f_s, (w, h), interpolation=cv2.INTER_LINEAR)
-                out = np.where(valid, d, filled)
+            dv = max(2, int(self.div))
+            sw, sh = max(1, w // dv), max(1, h // dv)
+            d_s = cv2.resize(np.where(valid, d, 0.0), (sw, sh), interpolation=cv2.INTER_AREA)
+            m_s = cv2.resize(valid.astype(np.float32), (sw, sh), interpolation=cv2.INTER_AREA)
+            p_s = d_s / np.maximum(m_s, 1e-3)
+            p_s = cv2.blur(p_s, (3, 3))
+            empty = m_s < 1e-3
+            if empty.any():
+                med = float(d[valid].mean()) if valid.any() else 0.0
+                p_s = np.where(empty, med if med > 0 else float(p_s.mean()), p_s)
+            if rgb640 is not None:
+                gray = cv2.cvtColor(rgb640, cv2.COLOR_BGR2GRAY)
+                g_s = cv2.resize(gray, (sw, sh), interpolation=cv2.INTER_AREA).astype(np.float32)
+                f_s = guided_filter_gray(g_s, p_s.astype(np.float32), self.radius, self.eps)
             else:
-                out = d
+                f_s = cv2.blur(p_s.astype(np.float32), (3, 3))
+            filled = cv2.resize(f_s, (w, h), interpolation=cv2.INTER_LINEAR)
+            out = np.where(valid, d, filled)
         if self.temporal > 0:
             of = out.astype(np.float32) if out.dtype != np.float32 else out
             if self.prev is None or self.prev.shape != of.shape:

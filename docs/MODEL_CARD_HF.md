@@ -193,3 +193,22 @@ hf upload <用户名>/Qwen3.8-27B-AscendC-W4A16 converted\qwen38_310b .
 - 仓库根目录布局必须保持 `meta.txt` / `model/` / `lm_head/` 层级（引擎按 `meta.txt` 里的相对路径读取）
 
 本文档由 `python tools/push_to_hf.py` 之外的手动流程验证；脚本内 `upload_large_folder` 走 Xet，国内网络建议直接用上面的 `hf upload` 命令。
+
+### 从 HuggingFace 下载（推荐）
+
+```bash
+# 方式 1：hf CLI（走镜像 + 关闭 Xet，国内更快更稳）
+HF_ENDPOINT=https://hf-mirror.com HF_HUB_DISABLE_XET=1 \
+  hf download dong2542107715/Qwen3.8-27B-AscendC-W4A16 --local-dir qwen38_310b
+
+# 方式 2：huggingface_hub（Python）
+HF_ENDPOINT=https://hf-mirror.com python -c "
+from huggingface_hub import snapshot_download
+snapshot_download('dong2542107715/Qwen3.8-27B-AscendC-W4A16', local_dir='qwen38_310b')"
+```
+
+下载后放到板端 `~/code/qwen38_310B/models/qwen38_310b`（`meta.txt` 里的路径是相对路径，目录层级不要改）。
+校验：应有 **1674 个文件 / 17.74 GB**。
+
+> 上传记录（2026-11-22）：分 72 批上传完成，71 批用 `hf upload`，最后一批 `layers/63` 因 OAuth token 过期改用 `HfApi.upload_folder` 补传；
+> 最终校验：本地 1672 个文件全部在远端（缺失 0），远端另有 `README.md` / `.gitattributes` 2 个仓库自带文件。
