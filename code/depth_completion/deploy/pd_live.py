@@ -50,11 +50,11 @@ class Grabber(threading.Thread):
             if p is None:
                 self.bad += 1
                 continue
-            dep, rgb = decode_payload(p)
+            dep, rgb = decode_payload(p, small_hw=(480, 640))
             if dep is None or float((dep > 0).mean()) < 0.02:
                 self.bad += 1
                 continue
-            rgb640 = cv2.resize(rgb, (640, 480), interpolation=cv2.INTER_AREA)
+            rgb640 = rgb
             with self.lock:
                 self.frame = (time.time(), dep, rgb640)   # colour already downscaled
             self.count += 1
@@ -131,8 +131,7 @@ class Publisher(threading.Thread):
             if ok:
                 self.srv.publish(self.chans["rgb"].id,
                                  FW.compressed_image_json(FRAME_ID, "jpeg", jb.tobytes(), ns), ns)
-            dm = depth_mm.astype(np.float32) * 0.001
-            ok, cb = cv2.imencode(".jpg", C.colorize(dm), [cv2.IMWRITE_JPEG_QUALITY, 80])
+            ok, cb = cv2.imencode(".jpg", C.colorize(depth_mm), [cv2.IMWRITE_JPEG_QUALITY, 80])
             if ok:
                 self.srv.publish(self.chans["col"].id,
                                  FW.compressed_image_json(FRAME_ID, "jpeg", cb.tobytes(), ns), ns)

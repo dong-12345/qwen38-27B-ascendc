@@ -124,7 +124,7 @@ FRAME_BYTES = HDR + DEPTH_BYTES_2P + RGB_BYTES          # 6,512,688 (HDR / dynam
 FRAME_BYTES_1P = HDR + 307200 + RGB_BYTES                # 6,205,488 (single depth plane)
 
 
-def decode_payload(p, want_bgr=True):
+def decode_payload(p, want_bgr=True, small_hw=None):
     """U3V payload -> (depth uint16 480x640, rgb uint8 1280x1536x3 or None).
 
     Layout (both variants share the planar colour block):
@@ -150,5 +150,12 @@ def decode_payload(p, want_bgr=True):
         return None, None
     if not want_bgr:
         return d, planes
+    if small_hw is not None:
+        # resize each colour plane straight to the target size: avoids the
+        # 1536x1280 stack + cvtColor + resize (~29 ms -> ~10 ms)
+        h2, w2 = small_hw
+        ps = [cv2.resize(planes[i], (w2, h2), interpolation=cv2.INTER_AREA) for i in range(3)]
+        small = cv2.merge(ps)
+        return d, cv2.cvtColor(small, cv2.COLOR_RGB2BGR)
     rgb = np.stack([planes[0], planes[1], planes[2]], axis=2)
     return d, cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
