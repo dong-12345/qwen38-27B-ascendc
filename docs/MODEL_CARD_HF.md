@@ -1,7 +1,7 @@
-# Model Card — Qwen3.8-27B (Qwen3.5 hybrid GDN) W4A16-Phase-Interleaved for Ascend 310B
+﻿# Model Card — Qwen3.8-27B (Qwen3.5 hybrid GDN) W4A16-Phase-Interleaved for Ascend 310B
 
 本仓库是 **Qwen3.8-27B（Qwen3.5 混合 Gated DeltaNet 架构，28B 参数）** 的**重排/重打包 4bit 权重**，
-专供自研实验性推理引擎 [`qwen38-ascendc`](https://github.com/<YOUR_USER>/qwen38-ascendc) 在
+专供自研实验性推理引擎 [`qwen38-ascendc`](https://github.com/dong2542107715/qwen38-ascendc) 在
 **Ascend 310B（OrangePi AI Pro 20T）** 上使用。
 
 > ⚠️ 这不是通用格式（不是 AWQ/GPTQ/GGUF/bnb），只对我们自己的 AscendC 引擎有效。
@@ -79,7 +79,7 @@ lm_head/weight.{w4,s,sz}.bin               # 248320 × 5120
 ## 3. 如何生成（从原始 AWQ 权重）
 
 ```bash
-git clone https://github.com/<YOUR_USER>/qwen38-ascendc
+git clone https://github.com/dong2542107715/qwen38-ascendc
 cd qwen38-ascendc
 
 # 1) 转换（需要原始 AWQ 权重目录）
@@ -102,7 +102,7 @@ pip install huggingface_hub
 export HF_TOKEN=hf_xxx
 python tools/push_to_hf.py \
   --folder converted/qwen38_310b \
-  --repo <YOUR_USER>/Qwen3.8-27B-AscendC-W4A16 \
+  --repo dong2542107715/Qwen3.8-27B-AscendC-W4A16 \
   --private
 ```
 
