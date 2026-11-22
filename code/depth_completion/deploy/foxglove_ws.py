@@ -68,6 +68,54 @@ def encode_point_cloud(frame_id, xyz, ts_ns):
             + _field(3, 2, _varint(len(pose)) + pose)
             + _field(4, 0, _varint(12)) + fields + _ld(6, data))
 
+COMPRESSED_IMAGE_SCHEMA = """{
+  "title": "foxglove.CompressedImage",
+  "type": "object",
+  "properties": {
+    "timestamp": {"type": "object", "properties": {"sec": {"type": "integer"}, "nsec": {"type": "integer"}}},
+    "frame_id": {"type": "string"},
+    "data": {"type": "string", "contentEncoding": "base64"},
+    "format": {"type": "string"}
+  }
+}"""
+
+POINTCLOUD_SCHEMA = """{
+  "title": "foxglove.PointCloud",
+  "type": "object",
+  "properties": {
+    "timestamp": {"type": "object", "properties": {"sec": {"type": "integer"}, "nsec": {"type": "integer"}}},
+    "frame_id": {"type": "string"},
+    "pose": {"type": "object", "properties": {
+      "position": {"type": "object", "properties": {"x": {"type": "number"}, "y": {"type": "number"}, "z": {"type": "number"}}},
+      "orientation": {"type": "object", "properties": {"x": {"type": "number"}, "y": {"type": "number"}, "z": {"type": "number"}, "w": {"type": "number"}}}}},
+    "point_stride": {"type": "integer"},
+    "fields": {"type": "array", "items": {"type": "object", "properties": {
+      "name": {"type": "string"}, "offset": {"type": "integer"}, "type": {"type": "integer"}}}},
+    "data": {"type": "string", "contentEncoding": "base64"}
+  }
+}"""
+
+
+def compressed_image_json(frame_id, fmt, data, ts_ns):
+    return json.dumps({"timestamp": {"sec": ts_ns // 1_000_000_000, "nsec": ts_ns % 1_000_000_000},
+                       "frame_id": frame_id, "format": fmt,
+                       "data": base64.b64encode(data).decode()}).encode()
+
+
+def point_cloud_json(frame_id, xyz, ts_ns):
+    return json.dumps({
+        "timestamp": {"sec": ts_ns // 1_000_000_000, "nsec": ts_ns % 1_000_000_000},
+        "frame_id": frame_id,
+        "pose": {"position": {"x": 0.0, "y": 0.0, "z": 0.0},
+                 "orientation": {"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0}},
+        "point_stride": 12,
+        "fields": [{"name": "x", "offset": 0, "type": 7},
+                   {"name": "y", "offset": 4, "type": 7},
+                   {"name": "z", "offset": 8, "type": 7}],
+        "data": base64.b64encode(np.ascontiguousarray(xyz, dtype="<f4").tobytes()).decode(),
+    }).encode()
+
+
 class Channel:
     def __init__(self, cid, topic, schema_name, schema, encoding="protobuf"):
         self.id = cid
@@ -80,9 +128,14 @@ class Channel:
         # schema is a base64-encoded protobuf FileDescriptorSet (what Foxglove
         # expects for encoding=protobuf); an empty string falls back to the
         # client's built-in definition for foxglove.* types
-        return {"id": self.id, "topic": self.topic, "encoding": self.encoding,
-                "schemaName": self.schema_name, "schemaEncoding": "protobuf",
-                "schema": self.schema}
+        out = {"id": self.id, "topic": self.topic, "encoding": self.encoding,
+               "schemaName": self.schema_name}
+        if self.schema:
+            out["schemaEncoding"] = "protobuf"
+            out["schema"] = self.schema
+        # no schema -> Foxglove falls back to its built-in definition for
+        # well-known foxglove.* message types
+        return out
 
 class _Client:
     def __init__(self, sock):

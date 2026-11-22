@@ -266,10 +266,10 @@ def main():
     chans = {}
     if not args.no_publish:
         srv = FW.FoxgloveServer(port=args.port)
-        chans["rgb"] = srv.add_channel("/camera/rgb", "foxglove.CompressedImage", FW.COMPRESSED_IMAGE_PROTO)
-        chans["col"] = srv.add_channel("/depth/colored", "foxglove.CompressedImage", FW.COMPRESSED_IMAGE_PROTO)
-        chans["dep"] = srv.add_channel("/depth/completed", "foxglove.CompressedImage", FW.COMPRESSED_IMAGE_PROTO)
-        chans["pc"] = srv.add_channel("/points", "foxglove.PointCloud", FW.POINTCLOUD_PROTO)
+        chans["rgb"] = srv.add_channel("/camera/rgb", "foxglove.CompressedImage", "")
+        chans["col"] = srv.add_channel("/depth/colored", "foxglove.CompressedImage", "")
+        chans["dep"] = srv.add_channel("/depth/completed", "foxglove.CompressedImage", "")
+        chans["pc"] = srv.add_channel("/points", "foxglove.PointCloud", "")
         srv.start()
         print("[ws] listening on 0.0.0.0:%d" % args.port, flush=True)
 

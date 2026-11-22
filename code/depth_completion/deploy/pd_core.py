@@ -232,15 +232,16 @@ class DepthCleaner:
         if bad.any():
             bad = cv2.dilate(bad, np.ones((3, 3), np.uint8))
         if bad.any():
-            # inlier test on the same 1/8 grid (cheap), then blown up to a mask
+            # per-pixel: keep the readings that agree with the local surface,
+            # drop only the outliers (block granularity decides *where* to look)
             surf_s = self._surface_small(d_s)
-            d_out = (d_s - surf_s)
-            keep_s = (np.abs(d_out) < self.inlier_mm) & (d_s > 0)
-            bad = np.where(keep_s, 0, bad).astype(np.uint8)
-            if bad.any():
-                mask = cv2.resize(bad, (w, h), interpolation=cv2.INTER_NEAREST) > 0
+            surf = cv2.resize(surf_s, (w, h), interpolation=cv2.INTER_LINEAR)
+            region = cv2.resize(bad, (w, h), interpolation=cv2.INTER_NEAREST) > 0
+            keep = (np.abs(d - surf) < self.inlier_mm) & (d > 0)
+            drop = region & ~keep
+            if drop.any():
                 d = d.copy()
-                d[mask] = 0.0
+                d[drop] = 0.0
         self.hole_frac = float((d == 0).mean())
         prev_ok = self.prev > 0
         out = cv2.addWeighted(d, self.alpha, self.prev, 1.0 - self.alpha, 0)
