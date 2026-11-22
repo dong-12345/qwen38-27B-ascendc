@@ -381,9 +381,13 @@ class ClassicCompleter:
                 if empty.any():
                     med = float(d[valid].mean()) if valid.any() else 0.0
                     p_s = np.where(empty, med if med > 0 else float(p_s.mean()), p_s)
-                gray = cv2.cvtColor(rgb640, cv2.COLOR_BGR2GRAY)
-                g_s = cv2.resize(gray, (sw, sh), interpolation=cv2.INTER_AREA).astype(np.float32)
-                f_s = guided_filter_gray(g_s, p_s.astype(np.float32), self.radius, self.eps)
+                if rgb640 is not None:
+                    gray = cv2.cvtColor(rgb640, cv2.COLOR_BGR2GRAY)
+                    g_s = cv2.resize(gray, (sw, sh), interpolation=cv2.INTER_AREA).astype(np.float32)
+                    f_s = guided_filter_gray(g_s, p_s.astype(np.float32), self.radius, self.eps)
+                else:
+                    # no colour frame (depth-only stream): plain smooth prior
+                    f_s = cv2.blur(p_s.astype(np.float32), (3, 3))
                 filled = cv2.resize(f_s, (w, h), interpolation=cv2.INTER_LINEAR)
                 out = np.where(valid, d, filled)
             else:

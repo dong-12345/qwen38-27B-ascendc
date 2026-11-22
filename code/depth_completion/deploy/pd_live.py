@@ -54,7 +54,7 @@ class Grabber(threading.Thread):
             if dep is None or float((dep > 0).mean()) < 0.02:
                 self.bad += 1
                 continue
-            rgb640 = rgb
+            rgb640 = rgb          # None when the camera streams depth only
             with self.lock:
                 self.frame = (time.time(), dep, rgb640)   # colour already downscaled
             self.count += 1
@@ -124,13 +124,14 @@ class Publisher(threading.Thread):
             t0 = time.perf_counter()
             ns = int(ts * 1e9)
             small = rgb                      # already 640x480 from the grabber
-            if abs(gain - 1.0) > 0.02:
-                small = cv2.convertScaleAbs(small, alpha=gain)
-            small = C.grade(small)
-            ok, jb = cv2.imencode(".jpg", small, [cv2.IMWRITE_JPEG_QUALITY, self.jpeg_q])
-            if ok:
-                self.srv.publish(self.chans["rgb"].id,
-                                 FW.compressed_image_json(FRAME_ID, "jpeg", jb.tobytes(), ns), ns)
+            if small is not None:
+                if abs(gain - 1.0) > 0.02:
+                    small = cv2.convertScaleAbs(small, alpha=gain)
+                small = C.grade(small)
+                ok, jb = cv2.imencode(".jpg", small, [cv2.IMWRITE_JPEG_QUALITY, self.jpeg_q])
+                if ok:
+                    self.srv.publish(self.chans["rgb"].id,
+                                     FW.compressed_image_json(FRAME_ID, "jpeg", jb.tobytes(), ns), ns)
             ok, cb = cv2.imencode(".jpg", C.colorize(depth_mm), [cv2.IMWRITE_JPEG_QUALITY, 80])
             if ok:
                 self.srv.publish(self.chans["col"].id,
@@ -233,7 +234,8 @@ def main():
             lat.append(dt)
             n += 1
             gain = ae.gain
-            ae.update(float(cv2.cvtColor(rgb, cv2.COLOR_BGR2GRAY).mean()))
+            if rgb is not None:
+                ae.update(float(cv2.cvtColor(rgb, cv2.COLOR_BGR2GRAY).mean()))
             pub.submit(ts, rgb, np.ascontiguousarray(dep_out), gain)
             if args.save_dir and saved < 4:
                 np.save(os.path.join(args.save_dir, "tof.npy"), dep_mm)

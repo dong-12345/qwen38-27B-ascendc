@@ -132,6 +132,10 @@ def decode_payload(p, want_bgr=True, small_hw=None):
     The short variant carries only one depth plane (320x480, half resolution).
     """
     n = len(p)
+    # depth-only stream (colour disabled on the camera): 640x480 uint16 + 8 B tail
+    if 640 * 480 * 2 <= n <= 640 * 480 * 2 + 4096:
+        d = np.frombuffer(p, dtype=np.uint16, count=640 * 480).reshape(480, 640).copy()
+        return d, None
     if not (FRAME_BYTES_1P - 2048 <= n <= FRAME_BYTES + 40960):
         return None, None
     cblk = np.frombuffer(p, dtype=np.uint8, count=RGB_BYTES, offset=n - RGB_BYTES)
