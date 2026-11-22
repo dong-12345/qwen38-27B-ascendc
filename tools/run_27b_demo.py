@@ -52,7 +52,7 @@ def main():
     remote = (
         "export LC_ALL=C; source %s/env.sh >/dev/null 2>&1; "
         "cd %s/src; "
-        "ENG27_IDS=%s ENG27_GEN=%d ENG27_DIR=%s timeout -s KILL 3000 "
+        "ENG27_NOWARMUP=1 ENG27_IDS=%s ENG27_GEN=%d ENG27_DIR=%s timeout -s KILL 3000 "
         "./out/bin/qwen38_ops_test engine_27b 2>&1"
         % (BOARD_ROOT, BOARD_ROOT, ids_str, args.gen, args.dir)
     )

@@ -54,8 +54,9 @@ class Grabber(threading.Thread):
             if dep is None or float((dep > 0).mean()) < 0.02:
                 self.bad += 1
                 continue
+            rgb640 = cv2.resize(rgb, (640, 480), interpolation=cv2.INTER_AREA)
             with self.lock:
-                self.frame = (time.time(), dep, rgb)
+                self.frame = (time.time(), dep, rgb640)   # colour already downscaled
             self.count += 1
             n_log += 1
             if n_log >= 60:
@@ -93,6 +94,7 @@ class Publisher(threading.Thread):
         self.n_depth = 0
         self.n_cloud = 0
         self.ms_encode = 0.0
+        self.lat = []
 
     def submit(self, ts, rgb, depth_mm, gain=1.0):
         with self.lock:
@@ -121,27 +123,28 @@ class Publisher(threading.Thread):
             ts, rgb, depth_mm, gain = it
             t0 = time.perf_counter()
             ns = int(ts * 1e9)
-            small = cv2.resize(rgb, (640, 480), interpolation=cv2.INTER_LINEAR)
+            small = rgb                      # already 640x480 from the grabber
             if abs(gain - 1.0) > 0.02:
                 small = cv2.convertScaleAbs(small, alpha=gain)
             small = C.grade(small)
             ok, jb = cv2.imencode(".jpg", small, [cv2.IMWRITE_JPEG_QUALITY, self.jpeg_q])
             if ok:
                 self.srv.publish(self.chans["rgb"].id,
-                                 FW.encode_compressed_image(FRAME_ID, "jpeg", jb.tobytes(), ns), ns)
+                                 FW.compressed_image_json(FRAME_ID, "jpeg", jb.tobytes(), ns), ns)
             dm = depth_mm.astype(np.float32) * 0.001
             ok, cb = cv2.imencode(".jpg", C.colorize(dm), [cv2.IMWRITE_JPEG_QUALITY, 80])
             if ok:
                 self.srv.publish(self.chans["col"].id,
-                                 FW.encode_compressed_image(FRAME_ID, "jpeg", cb.tobytes(), ns), ns)
+                                 FW.compressed_image_json(FRAME_ID, "jpeg", cb.tobytes(), ns), ns)
             now = time.perf_counter()
             if now - last_depth >= self.depth_every:
                 last_depth = now
-                ok, pb = cv2.imencode(".png", depth_mm, [cv2.IMWRITE_PNG_COMPRESSION, 1])
-                if ok:
-                    self.srv.publish(self.chans["dep"].id,
-                                     FW.encode_compressed_image(FRAME_ID, "png", pb.tobytes(), ns), ns)
-                    self.n_depth += 1
+                if "dep" in self.chans:
+                    ok, pb = cv2.imencode(".png", depth_mm, [cv2.IMWRITE_PNG_COMPRESSION, 1])
+                    if ok:
+                        self.srv.publish(self.chans["dep"].id,
+                                         FW.compressed_image_json(FRAME_ID, "png", pb.tobytes(), ns), ns)
+                        self.n_depth += 1
             if self.cloud_every > 0 and now - last_cloud >= self.cloud_every:
                 last_cloud = now
                 pts = self._cloud(depth_mm)
@@ -150,6 +153,7 @@ class Publisher(threading.Thread):
                                      FW.encode_point_cloud(FRAME_ID, pts, ns), ns)
                     self.n_cloud += 1
             self.ms_encode = (time.perf_counter() - t0) * 1e3
+            self.lat.append((time.time() - ts) * 1e3)
             self.n += 1
 
     def stop(self):
@@ -165,18 +169,25 @@ def main():
     ap.add_argument("--cloud-stride", type=int, default=4)
     ap.add_argument("--jpeg-q", type=int, default=80)
     ap.add_argument("--no-fill", action="store_true", help="publish the raw ToF (no completion)")
-    ap.add_argument("--temporal", type=float, default=0.45, help="temporal EMA weight (0=off)")
+    ap.add_argument("--depth16", action="store_true", help="also publish /depth/depth16 (16-bit PNG)")
+    ap.add_argument("--temporal", type=float, default=0.0, help="temporal EMA weight (0=off = sharpest)")
+    ap.add_argument("--regions", action="store_true",
+                    help="replace temporally unstable areas with a smooth surface (denoise, blurs)")
     ap.add_argument("--save-dir", default="")
     ap.add_argument("--seconds-only", action="store_true", help=argparse.SUPPRESS)
     args = ap.parse_args()
 
     srv = FW.FoxgloveServer(port=args.port)
     chans = {
-        "rgb": srv.add_channel("/camera/rgb", "foxglove.CompressedImage", FW.COMPRESSED_IMAGE_PROTO),
-        "col": srv.add_channel("/depth/colored", "foxglove.CompressedImage", FW.COMPRESSED_IMAGE_PROTO),
-        "dep": srv.add_channel("/depth/depth16", "foxglove.CompressedImage", FW.COMPRESSED_IMAGE_PROTO),
+        "rgb": srv.add_channel("/camera/rgb", "foxglove.CompressedImage", FW.COMPRESSED_IMAGE_SCHEMA,
+                               encoding="json"),
+        "col": srv.add_channel("/depth/colored", "foxglove.CompressedImage", FW.COMPRESSED_IMAGE_SCHEMA,
+                               encoding="json"),
         "pc": srv.add_channel("/points", "foxglove.PointCloud", FW.POINTCLOUD_PROTO),
     }
+    if args.depth16:
+        chans["dep"] = srv.add_channel("/depth/depth16", "foxglove.CompressedImage",
+                                       FW.COMPRESSED_IMAGE_SCHEMA, encoding="json")
     srv.start()
     print("[ws] ws://0.0.0.0:%d  topics: %s" % (args.port, ", ".join(c.topic for c in chans.values())), flush=True)
 
@@ -193,7 +204,7 @@ def main():
                     args.cloud_every, args.cloud_stride, intr)
     pub.start()
 
-    comp = None if args.no_fill else C.ClassicCompleter(temporal=args.temporal)
+    comp = None if args.no_fill else C.ClassicCompleter(temporal=args.temporal, regions=args.regions)
     ae = C.AutoExposure(target=110.0)
     g = Grabber()
     g.start()
@@ -222,19 +233,20 @@ def main():
             dt = (time.perf_counter() - t0) * 1e3
             lat.append(dt)
             n += 1
-            small = cv2.resize(rgb, (640, 480), interpolation=cv2.INTER_AREA)
             gain = ae.gain
-            ae.update(float(cv2.cvtColor(small, cv2.COLOR_BGR2GRAY).mean()))
+            ae.update(float(cv2.cvtColor(rgb, cv2.COLOR_BGR2GRAY).mean()))
             pub.submit(ts, rgb, np.ascontiguousarray(dep_out), gain)
             if args.save_dir and saved < 4:
                 np.save(os.path.join(args.save_dir, "tof.npy"), dep_mm)
                 np.save(os.path.join(args.save_dir, "filled.npy"), dep_out)
-                cv2.imwrite(os.path.join(args.save_dir, "rgb.png"), small)
+                cv2.imwrite(os.path.join(args.save_dir, "rgb.png"), rgb)
                 saved += 1
             if n % 60 == 0:
                 el = time.time() - t_start
-                print("[run] n=%d %.1f fps  proc p50=%.1f ms  cap=%.1f fps bad=%d"
-                      % (n, n / el, float(np.median(lat[-60:])), g.count / el, g.bad), flush=True)
+                print("[run] n=%d %.1f fps  proc p50=%.1f ms  e2e p50=%.0f ms  cap=%.1f fps bad=%d"
+                      % (n, n / el, float(np.median(lat[-60:])),
+                         float(np.median(pub.lat[-60:])) if pub.lat else -1,
+                         g.count / el, g.bad), flush=True)
     except KeyboardInterrupt:
         pass
     finally:
@@ -248,6 +260,8 @@ def main():
             "proc_p95_ms": round(float(np.percentile(lat, 95)), 2) if lat else None,
             "capture_fps": round(g.count / el, 2), "bad_frames": g.bad,
             "encode_ms": round(pub.ms_encode, 2), "published": pub.n,
+            "e2e_lat_p50_ms": round(float(np.median(pub.lat[-120:])), 1) if pub.lat else None,
+            "e2e_lat_p95_ms": round(float(np.percentile(pub.lat[-120:], 95)), 1) if pub.lat else None,
             "clouds": pub.n_cloud, "depth16": pub.n_depth,
         }), flush=True)
         sys.stdout.flush()

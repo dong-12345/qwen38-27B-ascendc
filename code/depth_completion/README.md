@@ -588,13 +588,36 @@ v2 的 RGB→深度帧 warp 太慢（150–245 ms），改为：yolo 直接在**
 |---|---|---|---|
 | v2 | 全分辨率 RGB warp + 半分辨率融合 | 546 / 633 ms | 1083.8 / 1748.2 mm |
 
-## 16. PromptDA-Small-Transparent 板端部署（2026-11-22 15:30，**最新**）
+## 16. 当前方案：CPU 传统深度补全（2026-11-22 17:10，**最新**）
 
-### 16.6 深度噪声抑制（2026-11-22 15:50 补）
-ToF 在低信噪区（黑窗帘后的空腔）会给出 ±600 mm 的随机值，看起来像「边界噪点」。三步处理，已内置在 `pd_live --denoise both`（默认）：
+> 学习类补全模型（LingBot-Depth / DAv2 / PromptDA-Small-Transparent）的权重、OM、转换脚本、参考代码与结果**已全部删除**（PC 释放约 260 MB，板端项目 74 MB → 14 MB）。不再使用 NPU。
 
-1. **不稳定区检测**（`pd_core.DepthCleaner`）：逐像素统计 |d_t − d_{t−1}| > 150 mm 的频率，按 8×8 块判定，块内超阈值 → **整块置为空洞**（而不是逐像素置零，否则会出现黑白格）。实测把噪点区覆盖率从 0 提到 ~100%，空洞率 ~13%。
-2. **时序 EMA**（alpha 0.45，跳变 >300 mm 直接重置）：静止场景噪声降到 1/3，运动不拖影。
-3. **平滑补洞**（`fill_prompt` 改为归一化卷积 num/den）：大空洞不再用 Telea（会拉丝/棋盘），改用高斯加权外推，1/4 分辨率计算，代价 ~4.6 ms。
+### 16.1 算法（deploy/pd_core.ClassicCompleter，纯 OpenCV/numpy）
+1. **离散点删除**：3×3 中值 + 「偏离局部中值 > 180 mm 丢弃」（去椒盐/飞点）
+2. **低信噪区判定**：8×8 块级时序不稳定统计（|Δd|>150 mm 比例 > 0.6）→ 整块用平滑面替换（中值救不了的面状噪声）
+3. **平滑先验**：1/8 分辨率归一化卷积，空块用 1/32 兜底（否则出现黑洞）
+4. **色彩引导补洞**：半分辨率导向滤波（自实现 boxFilter 版，比 ximgproc 快 6×），RGB 亮度当引导 → 补洞边缘跟随颜色
+5. **时序 EMA**：α=0.45，跳变 >400 mm 立即重置（不闪、不拖影）
 
-代价：`DepthCleaner 6 ms + fill_prompt 4.6 ms`（PC 实测，板上约 1.5–2×）。效果：对比图第 2/4/5 面板里左上角的噪点块完全消失。
+### 16.2 实测（板子空闲时）
+| 项 | 数值 |
+|---|---|
+| 单帧处理（640×480 全流程） | **41–45 ms** |
+| 端到端 | **11–19 fps**（上限由相机曝光决定，相机本身 11–19 fps） |
+| 补洞前后有效率 | 99.9% → 100% |
+| 点云 | 19,200 点/帧（stride 4），每 0.3 s |
+
+### 16.3 运行
+    cd ~/code/depth_completion
+    python3 deploy/pd_live.py --port 8765 --depth-every 0.2 --cloud-every 0.3 --seconds 0
+    # Foxglove 连 ws://<板子IP>:8765
+    #   /camera/rgb (jpeg)  /depth/colored (jpeg, 补全后伪彩)
+    #   /depth/depth16 (png, 补全后原始值)  /points (foxglove.PointCloud)
+
+关键依赖：相机 U3V 直连（pd_capture.py）、Foxglove WebSocket 自实现（foxglove_ws.py，MessageData 帧头必须是 0x01 | subId(4) | ts(8) | payload）。
+
+### 16.4 继续优化的方向
+- 导向滤波降到 1/4 分辨率（省 ~4 ms）
+- 平滑先验两帧共用一次（省 ~7 ms）
+- 时序 EMA / np.where 改原地操作（省 ~5 ms）
+- RGB 降采样（1536×1280→640×480，13 ms）已放在采集线程，不占主循环

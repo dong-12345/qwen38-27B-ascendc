@@ -125,16 +125,13 @@ class Channel:
         self.encoding = encoding
 
     def to_json(self):
-        # schema is a base64-encoded protobuf FileDescriptorSet (what Foxglove
-        # expects for encoding=protobuf); an empty string falls back to the
-        # client's built-in definition for foxglove.* types
+        # encoding="json"  -> schema is a JSON-schema string (schemaEncoding jsonschema)
+        # encoding="protobuf" -> schema is a base64 FileDescriptorSet
         out = {"id": self.id, "topic": self.topic, "encoding": self.encoding,
                "schemaName": self.schema_name}
         if self.schema:
-            out["schemaEncoding"] = "protobuf"
+            out["schemaEncoding"] = "jsonschema" if self.encoding == "json" else "protobuf"
             out["schema"] = self.schema
-        # no schema -> Foxglove falls back to its built-in definition for
-        # well-known foxglove.* message types
         return out
 
 class _Client:

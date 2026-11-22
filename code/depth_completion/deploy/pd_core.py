@@ -252,59 +252,129 @@ class DepthCleaner:
         self.prev = np.where(d > 0, out, self.prev)
         return np.clip(out, 0, 65535).astype(np.uint16)
 
-class ClassicCompleter:
-    """Real-time CPU depth completion: outlier removal + colour-guided fill.
+def _box(img, r):
+    return cv2.boxFilter(img, -1, (2 * r + 1, 2 * r + 1), borderType=cv2.BORDER_REFLECT)
 
-    Steps (640x480, ~20 ms on the OrangePi CPU):
-      1. 3x3 median -> kill salt & pepper returns
-      2. drop pixels that disagree with the local median (flying pixels / edges)
-      3. coarse smooth prior by normalised convolution at 1/8 resolution
-      4. guided filter with the RGB frame -> prior snaps to colour edges
-      5. keep the measured depth wherever it survived, fill the rest
+
+def guided_filter_gray(guide, src, r=4, eps=400.0):
+    """Single-channel guided filter (He et al.) with box filters."""
+    I = guide.astype(np.float32)
+    p = src.astype(np.float32)
+    mI, mp = _box(I, r), _box(p, r)
+    varI = _box(I * I, r) - mI * mI
+    cov = _box(I * p, r) - mI * mp
+    a = cov / (varI + eps)
+    b = mp - a * mI
+    return _box(a, r) * I + _box(b, r)
+
+
+class ClassicCompleter:
+    """Real-time CPU depth completion (no model, no NPU).
+
+      1. 3x3 median + local-median test -> drop salt & pepper / flying pixels
+      2. one smooth prior per frame (normalised convolution at 1/8, with a
+         coarser fallback so it never collapses to zero)
+      3. temporally unstable 8x8 blocks (low-signal areas) are replaced by that
+         prior, which removes the dense speckle a median cannot reach
+      4. remaining holes are filled with the prior refined by a guided filter
+         (half resolution, luminance guide) so the fill follows RGB edges
+      5. temporal EMA for flicker-free output
     """
 
-    def __init__(self, median_k=3, outlier_mm=180.0, eps=400.0, radius=8, temporal=0.45):
+    def __init__(self, median_k=3, outlier_mm=180.0, eps=60.0, radius=4, temporal=0.0,
+                 div=2, unstable_th=0.6, diff_mm=150.0, regions=False):
+        self.regions = regions
         self.median_k = median_k
         self.outlier_mm = outlier_mm
         self.eps = eps
         self.radius = radius
         self.temporal = temporal
+        self.div = div
+        self.unstable_th = unstable_th
+        self.diff_mm = diff_mm
         self.prev = None
+        self.unstable = None
         self.hole_frac = 0.0
-        self._lut = None
+        self.region_frac = 0.0
 
-    def _coarse(self, d, valid):
+    def _prior(self, d, valid):
         h, w = d.shape
         sw, sh = max(1, w // 8), max(1, h // 8)
-        small = cv2.resize(np.where(valid, d, 0).astype(np.float32), (sw, sh), interpolation=cv2.INTER_AREA)
+        src = np.where(valid, d, 0.0).astype(np.float32)
+        small = cv2.resize(src, (sw, sh), interpolation=cv2.INTER_AREA)
         cnt = cv2.resize(valid.astype(np.float32), (sw, sh), interpolation=cv2.INTER_AREA)
-        num = cv2.GaussianBlur(small, (0, 0), 2.0)
-        den = cv2.GaussianBlur(cnt, (0, 0), 2.0)
-        prior = num / np.maximum(den, 1e-3)
+        prior = small / np.maximum(cnt, 1e-3)
+        prior = cv2.blur(prior, (3, 3))
+        empty = cnt < 1e-3
+        if empty.any():
+            med = float(np.median(d[valid])) if valid.any() else 0.0
+            cs, csh = max(1, sw // 4), max(1, sh // 4)
+            cprior = cv2.resize(small, (cs, csh), interpolation=cv2.INTER_AREA) / \
+                np.maximum(cv2.resize(cnt, (cs, csh), interpolation=cv2.INTER_AREA), 1e-3)
+            cprior = cv2.blur(cprior, (3, 3))
+            cprior = cv2.resize(cprior, (sw, sh), interpolation=cv2.INTER_LINEAR)
+            cprior[cprior <= 0] = med
+            prior = np.where(empty, cprior, prior)
         return cv2.resize(prior, (w, h), interpolation=cv2.INTER_LINEAR)
 
-    def __call__(self, tof_mm, rgb_bgr):
+    def __call__(self, tof_mm, rgb640):
         d = tof_mm.astype(np.float32)
         valid = d > 0
         if self.median_k >= 3:
+            # median is only used to *detect* isolated bad pixels - the original
+            # values are kept so edges stay sharp (replacing them with the
+            # median value was what made the depth look blurry)
             med = cv2.medianBlur(tof_mm, self.median_k).astype(np.float32)
-            valid &= np.abs(d - med) < self.outlier_mm
-            d = np.where(valid, med, 0.0)
-        prior = self._coarse(d, valid)
-        filled = prior
-        if hasattr(cv2, "ximgproc"):
-            src = np.where(valid, d, prior).astype(np.float32)
-            guide = cv2.resize(rgb_bgr, (d.shape[1], d.shape[0]), interpolation=cv2.INTER_AREA)
-            filled = cv2.ximgproc.guidedFilter(guide, src, self.radius, self.eps)
-        out = np.where(valid, d, filled)
+            valid = valid & (np.abs(d - med) < self.outlier_mm)
+            d = np.where(valid, d, 0.0)
+        h, w = d.shape
+        prior = self._prior(d, valid)
+        bh, bw = max(1, h // 8), max(1, w // 8)
+        if self.regions and self.prev is not None and self.prev.shape == d.shape:
+            d_s = cv2.resize(d, (bw, bh), interpolation=cv2.INTER_AREA)
+            p_s = cv2.resize(self.prev, (bw, bh), interpolation=cv2.INTER_AREA)
+            diff_s = cv2.absdiff(d_s, p_s)
+            if self.unstable is None:
+                self.unstable = np.zeros((bh, bw), np.float32)
+            self.unstable = 0.7 * self.unstable + 0.3 * (diff_s > self.diff_mm).astype(np.float32)
+            # soft weight instead of a hard on/off mask: a threshold that flips
+            # between frames is what makes the colour/point cloud flicker
+            lo = self.unstable_th * 0.6
+            hi = max(self.unstable_th, lo + 1e-3)
+            wgt = np.clip((self.unstable - lo) / (hi - lo), 0.0, 1.0).astype(np.float32)
+            self.region_frac = float((wgt > 0.5).mean())
+            if wgt.max() > 0.05:
+                wf = cv2.resize(wgt, (w, h), interpolation=cv2.INTER_LINEAR)
+                wf = cv2.dilate(wf, np.ones((7, 7), np.float32))
+                d = d * (1.0 - wf) + prior * wf
+                valid = (d > 0) & (valid | (wf > 0.5))
         self.hole_frac = float((~valid).mean())
+        if valid.all():
+            out = d
+        else:
+            dv = max(1, self.div)
+            sw, sh = w // dv, h // dv
+            gray = cv2.cvtColor(rgb640, cv2.COLOR_BGR2GRAY)
+            g_small = cv2.resize(gray, (sw, sh), interpolation=cv2.INTER_AREA).astype(np.float32)
+            p_small = cv2.resize(prior, (sw, sh), interpolation=cv2.INTER_AREA)
+            f_small = guided_filter_gray(g_small, p_small, self.radius, self.eps)
+            filled = cv2.resize(f_small, (w, h), interpolation=cv2.INTER_LINEAR)
+            out = np.where(valid, d, filled)
         if self.temporal > 0:
             if self.prev is None or self.prev.shape != out.shape:
                 self.prev = out.copy()
             else:
-                jump = np.abs(out - self.prev) > 400.0
-                ema = cv2.addWeighted(out, 1.0 - self.temporal, self.prev, self.temporal, 0)
-                ema[jump] = out[jump]
-                out = ema
+                # edge-aware temporal filter: blend only where the depth is
+                # locally smooth, take the current frame on/near edges so they
+                # stay sharp (a plain EMA smears every edge that jitters)
+                gx = cv2.Sobel(out, cv2.CV_32F, 1, 0, ksize=3)
+                gy = cv2.Sobel(out, cv2.CV_32F, 0, 1, ksize=3)
+                grad = np.abs(gx) + np.abs(gy)
+                w = np.clip(grad / 400.0, 0.0, 1.0)
+                a = self.temporal * (1.0 - w)
+                jump = np.abs(out - self.prev) > 600.0
+                a = np.where(jump, 0.0, a).astype(np.float32)
+                out = out * (1.0 - a) + self.prev * a
                 self.prev = out.copy()
+        out[out <= 0] = 0.0
         return np.clip(out, 0, 65535).astype(np.uint16)
