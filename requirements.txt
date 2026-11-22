@@ -1,0 +1,8 @@
+# 转换与验证工具依赖（PC 侧）。板端只需 CANN 8.0.0，不需要这些。
+numpy>=1.24
+safetensors>=0.4
+tokenizers>=0.15
+# 可选：用官方参考实现做架构对齐校验 / 应用 chat template
+# transformers>=5.24
+# torch>=2.0          # 仅在需要读取 bf16 safetensors 做转换校验时用到
+# huggingface_hub>=0.23   # 仅在 push_to_hf.py 上传权重时需要

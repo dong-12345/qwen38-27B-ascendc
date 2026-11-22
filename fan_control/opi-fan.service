@@ -1,0 +1,26 @@
+[Unit]
+Description=OrangePi AI Pro 20T adaptive fan controller (Ascend 310B4)
+Documentation=file:/home/HwHiAiUser/fan_control/README.md
+After=multi-user.target
+# 允许无限重启，避免高温时因启动限流退出
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/home/HwHiAiUser/fan_control
+ExecStart=/home/HwHiAiUser/fan_control/fan_control.sh --loop 5
+# 优雅停止：脚本 trap SIGTERM，不改变风扇状态即退出
+KillSignal=SIGTERM
+KillMode=control-group
+TimeoutStopSec=15
+Restart=always
+RestartSec=5
+# 低优先级运行，不抢占业务
+Nice=5
+# 日志同时进 journal 和 /var/log/opi_fan.log
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

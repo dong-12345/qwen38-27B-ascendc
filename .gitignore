@@ -1,0 +1,48 @@
+# ===== 大文件 / 模型 / 权重（不入库，见 README 的获取方式）=====
+models/
+converted/
+tmp/
+官方工具/
+用户手册/
+code/*/models/
+code/*/results/
+code/*/data/
+code/*/lingbot-depth/
+*.img
+*.img.xz
+*.safetensors
+*.onnx
+*.om
+*.bin
+*.w4.bin
+*.f16.bin
+
+# ===== 构建产物 =====
+build/
+out/
+*.o
+*.so
+CMakeCache.txt
+CMakeFiles/
+
+# ===== 密钥 / 个人环境 =====
+tools/opi_key
+tools/opi_key.pub
+*.pem
+.env
+
+# ===== 日志与临时文件 =====
+*.log
+*.out.txt
+cmds_*.txt
+__pycache__/
+*.pyc
+.cache/
+.venv/
+venv/
+
+# ===== 编辑器 =====
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,2 @@
+# Hikrobot MV-DT01SDU (2bdf:0001) ToF camera — non-root USB access
+SUBSYSTEM=="usb", ATTR{idVendor}=="2bdf", ATTR{idProduct}=="0001", MODE="0666", GROUP="plugdev"
