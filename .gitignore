@@ -46,3 +46,7 @@ venv/
 .idea/
 .DS_Store
 Thumbs.db
+
+# 本地备份（不进仓库）
+备份/
+
