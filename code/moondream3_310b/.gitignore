@@ -1,0 +1,12 @@
+# 构建产物
+ops/build/
+ops/out/
+ops/md3_engine
+ops/compile_commands.json
+__pycache__/
+*.pyc
+
+# 本地权重/临时
+*.bin
+*.safetensors
+tmp/
