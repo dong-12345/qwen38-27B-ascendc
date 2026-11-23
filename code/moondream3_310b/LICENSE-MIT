@@ -21,12 +21,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ---------------------------------------------------------------------------
-Third-party notices:
+Scope: this MIT license applies only to the original source code and
+documentation authored for this project (ops/, tools/, docs/).
 
-- ref/ contains source files from the official Moondream 3 Preview release
-  (moondream/moondream3-preview). Those files are licensed under BSL 1.1 +
-  Additional Use Grant, see ref/LICENSE.md. They are included only for
-  reference/comparison purposes.
-- Model weights derived from Moondream 3 Preview remain subject to the
-  Moondream license (BSL 1.1 + Additional Use Grant, converting to Apache-2.0
-  two years after release). Commercial use requires reviewing that license.
+It does NOT apply to:
+- Model weights, including any converted/quantized weights (see LICENSE-BSL-1.1.md);
+- ref/ (official Moondream source, under BSL 1.1 + Additional Use Grant);

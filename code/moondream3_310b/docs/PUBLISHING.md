@@ -2,14 +2,21 @@
 
 项目目录：`code/moondream3_310b/`（0.4 MB，44 个文件；本目录已在工作区 git 仓库提交）。
 
-## 待你确认的 4 件事
+## 许可决策（已按官方 LICENSE 核实）
 
-| 项 | 当前准备 | 需要你确认 |
+| 对象 | 许可 | 依据 |
 |---|---|---|
-| 代码许可 | LICENSE 暂为 MIT | 是否改为 Apache-2.0 / 其他 |
-| GitHub 仓库名 | 未创建 | `gh repo create <user>/<repo>` 的名字/账号 |
-| HF 仓库 | 未创建 | `<user>/moondream3-preview-ascend310b`（model repo）是否合适 |
-| HF 是否含权重 | 准备了 6.3 GB 权重（文本 W4 5.4GB + vision f16 0.85GB） | 上传权重、只传代码+文档、或权重打 tar |
+| HF 权重 repo（文本 W4A16 + vision f16 + meta + tokenizer） | **BSL 1.1**（HF 字段 `license: other` + `license_name: business-source-license-1.1`） | 官方 LICENSE 第 4 行：Licensed Work 含 "Model Weights and any Derivatives"，Derivatives 明确包括 quantizations 与 weight-level conversions |
+| GitHub 代码 repo（ops/ tools/ docs/） | **MIT** | 项目原创代码，可自由选择；与权重许可独立 |
+| `ref/` 官方源码 | BSL 1.1（保留原 LICENSE） | 公开发布的 GitHub 仓库建议**移除 ref/** 或单独分层声明 |
+| 权重再次分发 | 必须显眼展示 BSL 1.1 全文 | 官方 LICENSE 第 23 行 "You must conspicuously display this License on each original or modified copy" |
+
+要点：
+
+- **不能**给权重标 MIT/Apache-2.0——即使用自己的转换脚本，量化/转换权重属于 Derivative，仍受 BSL 1.1；
+- Additional Use Grant 允许生产使用，但禁止与 M87 Labs 付费版竞争的 hosted/embedded 付费产品；组织内部使用不受限；
+- Change Date：该版本首次公开发布后 **两年**，之后按 Apache-2.0；
+- 商业授权联系 contact@m87.ai。
 
 ## GitHub（独立仓库，保留历史）
 

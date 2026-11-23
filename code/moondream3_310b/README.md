@@ -53,7 +53,14 @@ code/moondream3_310b/
 - 文本 decode 2.38 s/tok、vision encode 40 s、image prefix 30 s、图像问答端到端 145 s；
 - 详细基准见 docs/BENCHMARK.md。
 
-## 许可提醒
+## 许可
 
-Moondream 3 Preview 权重为 **BSL 1.1 + Additional Use Grant**（非 OSI 开源，2 年后转 Apache-2.0），
-商用前请阅读 docs/OPEN_SOURCE.md 中的条款摘要。
+- **权重（含本项目的 W4A16 / fp16 转换版本）**：Moondream 3 (Preview) 的 **Business Source License 1.1**
+  （Licensor: M87 Labs, Inc.）—— 官方 Licensed Work 明确包含 Model Weights 及其 Derivatives
+  （quantizations / weight-level conversions 均属 Derivatives）；允许生产使用，但不得以 hosted/embedded 方式
+  提供与 M87 Labs 付费版本竞争的付费产品；首次公开发布两年后转 Apache-2.0。
+  完整条款见 [LICENSE-BSL-1.1.md](LICENSE-BSL-1.1.md)，商业授权联系 contact@m87.ai。
+- **本项目代码（ops/ tools/ docs/）**：MIT，见 [LICENSE-MIT](LICENSE-MIT)。
+- `ref/` 为官方 Moondream 源码，遵循其原 BSL 1.1 许可（[ref/LICENSE.md](ref/LICENSE.md)）。
+
+发布准备（GitHub / Hugging Face 命令、待确认项）见 [docs/PUBLISHING.md](docs/PUBLISHING.md)。

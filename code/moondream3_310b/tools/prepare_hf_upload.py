@@ -55,6 +55,7 @@ def main():
     ap.add_argument('--converted', default=os.path.join(WS, 'converted', 'moondream3_310b'))
     ap.add_argument('--tokenizer', default=os.path.join(WS, 'models', 'starmie-v1'))
     ap.add_argument('--tar-weights', action='store_true', help='把 weights/ 打成单个 weights.tar（适合大文件上传）')
+    ap.add_argument('--with-tools', action='store_true', help='同时携带 tools/ 与 docs/（默认只发权重+模型卡，代码走 GitHub）')
     args = ap.parse_args()
 
     out = os.path.abspath(args.out)
@@ -63,7 +64,9 @@ def main():
     os.makedirs(out, exist_ok=True)
 
     shutil.copy2(os.path.join(ROOT, 'MODEL_CARD.md'), os.path.join(out, 'README.md'))
-    shutil.copy2(os.path.join(ROOT, 'LICENSE'), os.path.join(out, 'LICENSE'))
+    # 权重 repo：必须显眼展示官方 BSL 1.1 全文（含 M87 Labs 条款）
+    shutil.copy2(os.path.join(ROOT, 'LICENSE-BSL-1.1.md'), os.path.join(out, 'LICENSE'))
+    shutil.copy2(os.path.join(ROOT, 'LICENSE-MIT'), os.path.join(out, 'LICENSE-MIT'))
 
     nw = copy_tree(args.converted, os.path.join(out, 'weights'))
     print('[hf] weights: %d files' % nw)
@@ -74,13 +77,15 @@ def main():
 
     ntool = 0
     tdir = os.path.join(ROOT, 'tools')
-    for fn in os.listdir(tdir):
-        if fn.endswith(('.py', '.sh')):
-            link_or_copy(os.path.join(tdir, fn), os.path.join(out, 'tools', fn)); ntool += 1
-    print('[hf] tools: %d files' % ntool)
-
-    nd = copy_tree(os.path.join(ROOT, 'docs'), os.path.join(out, 'docs'), ext='.md')
-    print('[hf] docs: %d files' % nd)
+    if not args.with_tools:
+        tdir = None
+    if tdir:
+        for fn in os.listdir(tdir):
+            if fn.endswith(('.py', '.sh')):
+                link_or_copy(os.path.join(tdir, fn), os.path.join(out, 'tools', fn)); ntool += 1
+        print('[hf] tools: %d files' % ntool)
+        nd = copy_tree(os.path.join(ROOT, 'docs'), os.path.join(out, 'docs'), ext='.md')
+        print('[hf] docs: %d files' % nd)
 
     if args.tar_weights:
         import tarfile
