@@ -1,0 +1,9 @@
+# PC 侧工具依赖（转换 / 预处理 / 参考实现 / QA 脚本）
+numpy>=1.24
+tokenizers>=0.20
+safetensors>=0.4
+Pillow>=10.0
+huggingface_hub>=0.23
+
+# 可选：跑 tools/ref_vision.py（GPU/CPU 验证 vision 编码器）
+# torch>=2.2

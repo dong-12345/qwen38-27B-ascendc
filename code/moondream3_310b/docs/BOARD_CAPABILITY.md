@@ -1,6 +1,6 @@
 # 板端能力实测（OrangePi AI Pro 20T / Ascend 310B1）
 
-环境：CANN 8.0.0，驱动/npu-smi 25.2.0，Ubuntu 22.04，23GB 统一内存，4×ARM CPU，SSH `HwHiAiUser@192.168.137.163`。
+环境：CANN 8.0.0，驱动/npu-smi 25.2.0，Ubuntu 22.04，23GB 统一内存，4×ARM CPU，SSH `<昇腾板卡 IP>`（用户名 HwHiAiUser，板卡默认用户）。
 
 ## 1. 硬件与 AI Core
 

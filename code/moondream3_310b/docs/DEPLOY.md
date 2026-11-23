@@ -42,7 +42,8 @@ WiFi 约 1.2MB/s，5GB 约 70 分钟；建议 tar 单流：
 
 ```powershell
 tar -czf $env:TEMP\md3_weights.tgz -C converted moondream3_310b
-scp -i tools/opi_key $env:TEMP\md3_weights.tgz HwHiAiUser@192.168.137.163:~/
+# 先设置板卡地址与本机私钥：BOARD=HwHiAiUser@<板卡IP>；KEY=~/.ssh/id_rsa（或你的板卡私钥）
+scp -i $KEY $env:TEMP\md3_weights.tgz ${BOARD}:~/
 # 板端
 cd ~/code/moondream3_310b && tar -xzf ~/md3_weights.tgz -C models/
 ```

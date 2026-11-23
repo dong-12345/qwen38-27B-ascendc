@@ -9,8 +9,8 @@ from tokenizers import Tokenizer
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ISO = os.path.join(ROOT, "tmp", "crops.bin")
 TOK = os.path.join(ROOT, "models", "starmie-v1", "tokenizer.json")
-KEY = os.path.join(ROOT, "tools", "opi_key")
-BOARD = "HwHiAiUser@192.168.137.163"
+KEY = os.environ.get("MD3_KEY", os.path.expanduser("~/.ssh/id_rsa"))
+BOARD = os.environ.get("MD3_BOARD", "HwHiAiUser@<board-ip>")
 ENV = ("cd ~/code/moondream3_310b/ops && source /usr/local/Ascend/ascend-toolkit/set_env.sh && "
        "export LD_LIBRARY_PATH=$PWD/out/lib:$PWD/out/lib64:/usr/local/Ascend/ascend-toolkit/latest/lib64:$LD_LIBRARY_PATH && ")
 

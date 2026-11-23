@@ -8,8 +8,8 @@
 import argparse, os, re, subprocess, sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-KEY = os.path.join(ROOT, "..", "..", "tools", "opi_key")
-BOARD = "HwHiAiUser@192.168.137.163"
+KEY = os.environ.get("MD3_KEY", os.path.expanduser("~/.ssh/id_rsa"))
+BOARD = os.environ.get("MD3_BOARD", "HwHiAiUser@<board-ip>")
 BOARD_ROOT = "~/code/moondream3_310b"
 TOK = os.path.join(ROOT, "..", "..", "models", "starmie-v1", "tokenizer.json")
 
