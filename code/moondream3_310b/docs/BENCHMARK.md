@@ -9,14 +9,14 @@
 |---|---|---|
 | 文本 decode（24 层，8 token） | "Hello! How can I help you today?" | **2.38 s/token** |
 | 文本 prefill（7 token，ACLNN 混合引擎） | 与 decode 路径输出完全一致 | **9.9 s**（1.4 s/token） |
-| vision encode（2 crops，27 层 ViT） | 与 bf16 参考逐层对齐（L0 corr 0.9994+） | **40.4 s** |
+| vision encode（2 crops，27 层 ViT） | L0/attn 与 bf16 参考 corr≈1；全量 enc 受 f16 累积偏差（问答语义正确） | **40.4 s** |
 | image prefix prefill（730 token） | 无崩溃，KV cache 正确 | **30.1 s** |
 | 图像问答端到端（16 token 生成） | 红圆图 + "What color is the circle?" → **"The circle is red."** | **145 s** |
 
 ## 2. 与参考对齐
 
 - 文本 24 层 decode / prefill logits 与 numpy 参考（官方 modeling 移植）corr 0.9996+、top1 一致。
-- vision：patch_emb/LN1/qkv/attn/L0 与 bf16 numpy 参考 corr 1.000000（max_abs ≤ 0.008）。
+- vision：patch_emb/LN1/qkv/attn/L0 与 bf16 numpy 参考 corr 1.000000（max_abs ≤ 0.008）；27 层堆叠后 enc 与参考存在 f16 累积偏差（mean abs≈0.42），但图像问答语义正确（红圆→red）。
 - 图像问答语义正确，说明视觉特征 + 730 token 多模态 prefill 链路可用。
 
 ## 3. 算子 / device 性能（实测）
