@@ -33,6 +33,11 @@ code/moondream3_310b/
   ref/       官方 modeling 源码（对照）
 \`\`\`
 
+## 发布
+
+- HF 权重：`dong2542107715/moondream3-preview-ascend310b`（BSL 1.1）
+- GitHub 代码：`dong-12345/moondream3_310b`（MIT）
+
 ## 已知问题 / 后续优化
 
 1. **vision 速度**：40.4 s 中 CPU attention（head_dim=72，ACLNN 不支持非 32B 对齐 stride）约 15–20 s。
