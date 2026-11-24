@@ -35,8 +35,8 @@ code/moondream3_310b/
 
 ## 发布
 
-- HF 权重：`dong2542107715/moondream3-preview-ascend310b`（BSL 1.1）
-- GitHub 代码：`dong-12345/moondream3_310b`（MIT）
+- HF 权重：https://huggingface.co/dong2542107715/moondream3-preview-ascend310b （BSL 1.1，8898 文件 / 6.4GB，已校验 sha256）
+- GitHub 代码：https://github.com/dong-12345/moondream3_310b （MIT，main=2 commits）
 
 ## 已知问题 / 后续优化
 
