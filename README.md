@@ -1,13 +1,27 @@
-# Qwen3.8-27B (Qwen3.5 hybrid GDN) 在 OrangePi AI Pro 20T / Ascend 310B 上的自研 AscendC 推理栈
+# OrangePi AI Pro 20T（Ascend 310B1）上的自研 AscendC 推理栈：Qwen3.8-27B + Moondream3
 
 [![GitHub](https://img.shields.io/badge/GitHub-qwen38--27B--ascendc-black)](https://github.com/dong-12345/qwen38-27B-ascendc)
 [![HuggingFace](https://img.shields.io/badge/&#129303;-Qwen3.8--27B--AscendC--W4A16-yellow)](https://huggingface.co/dong2542107715/Qwen3.8-27B-AscendC-W4A16)
+[![HuggingFace](https://img.shields.io/badge/&#129303;-Moondream3--Ascend310B-orange)](https://huggingface.co/dong2542107715/moondream3-preview-ascend310b)
 
-在 **OrangePi AI Pro 20T（Ascend 310B1，CANN 8.0.0，23GB 内存，~1.46 TFLOPS Cube）** 上，
-用**纯 AscendC 手写算子 + 自研推理引擎**跑通 **Qwen3.8-27B（28B 参数，4bit 量化，48 层 Gated DeltaNet + 16 层全注意力）**，
-输出语义正确，实测 **0.080 tok/s（≈12.5 s/token）**。
-性能定位与提速路线见 [docs/GEMV性能分析与优化路线.md](docs/GEMV性能分析与优化路线.md)：
-**瓶颈是"每输出行的向量指令条数"（~48 条/行 × 65 ns），不是带宽（10.2 GB/s 只用到 9%）**。
+在 **OrangePi AI Pro 20T（Ascend 310B1，单 AI Core，CANN 8.0.0，23 GB 内存，~1.46 TFLOPS Cube）** 上，
+用**纯 AscendC 手写算子 + 自研推理引擎**跑通两个 4bit（W4A16 group-32 非对称）模型，并做了系统性的性能优化：
+
+| 模型 | 指标 | 优化前 | **优化后** | 加速 | 输出一致性 |
+|---|---|---|---|---|---|
+| **Qwen3.8-27B**（28B，48 层 GDN + 16 层全注意力） | **prefill**（17 token） | 212.8 s（12.52 s/token） | **37.1 s（2.18 s/token）** | **5.7x** | ✓ token 完全相同 |
+| | **decode**（默认 gen2） | 14.28 s/token | 12.6 s/token | 1.1x | ✓ 逐位相同 |
+| | **decode**（AX/Axpy-N） | 14.28 s/token | **3.60 s/token** | **4.0x** | ✓ token 完全相同 |
+| **Moondream3**（VLM，W4A16 + MoE） | **decode** | 2.39 s/token | **0.21 s/token = 4.8 tok/s** | **11.4x** | ✓ token 完全相同 |
+
+> 完整的前后对比、瓶颈定位方法、复现命令与踩坑记录：[docs/优化总结与复现.md](docs/优化总结与复现.md)
+
+**两个关键结论**（都是板端实测推导出来的）：
+1. **prefill 慢的根因是"逐 token 逐行 GEMV"** → 改成 layer-major 批量 + `dequant_w4`(AIV) + `aclnnMatmul`(Cube)
+   两段式，单矩阵实测 **24.2x / 15.5x**，端到端 **5.7x**。
+2. **decode 慢的根因不是带宽，而是"每输出行的向量指令条数"**（~48 条/行 × 65 ns ≈ 3.1 µs/行；10.2 GB/s 只用到 9%）
+   → 权重离线重排成 **AX `[g][w8][n]`** + 沿 N 向量化的 **Axpy-N kernel**（无归约树），**4.0x / 11.4x**。
+   物理地板：27B 每 token 15.73 GB ÷ 10.2 GB/s = 1.54 s/token（单核 0.65 tok/s）。
 
 > 本项目**不依赖** MindIE / vLLM / Ascend C 的模型库，所有算子（含 Gated DeltaNet 全流程、部分 RoPE GQA 解码、
 > 4bit 非对称权重 GEMV）都是自己用 AscendC 写的；推理引擎自己调度、自己管 NPU 显存与 KV/GDN 状态。
@@ -16,14 +30,18 @@
 
 ## 1. 结果速览（全部为板端实测）
 
-| 规模 | decode | 说明 |
+| 项 | 结果 | 说明 |
 |---|---|---|
 | 1 层（调试子集） | 0.96 s/forward | 单层对拍用 |
 | 41 层子集 | 0.110 tok/s（9.12 s/token） | 9.10 GB 权重，加载 51.5 s |
 | 48 层子集 | 0.075 tok/s（13.31 s/token） | 10.48 GB 权重，加载 69 s |
-| **64 层全量 decode（gen2）** | **0.080 tok/s（12.55 s/token）** | 逐位一致基线 |
-| **64 层全量 decode（AX）** | **0.278 tok/s（3.60 s/token）** | token 与基线完全相同，**4.0x** |
-| **64 层全量 prefill** | **0.46 tok/s（2.19 s/token）** | Cube 两段式（dequant+MatMul）批量，**5.7x** |
+| **64 层全量 decode（gen2，默认）** | **0.080 tok/s（12.6 s/token）** | 逐位一致基线 |
+| **64 层全量 decode（AX/Axpy-N）** | **0.278 tok/s（3.60 s/token）** | token 与基线完全相同，**4.0x** |
+| **64 层全量 prefill** | **0.46 tok/s（2.18 s/token）** | Cube 两段式批量，**5.7x** |
+| **Cube 两段式单矩阵（M=32）** | 72.2 ms / 64.0 ms | 对向量 GEMV 24.2x / 15.5x |
+| **Moondream3 decode（AX/Axpy-N）** | **0.21 s/token（4.8 tok/s）** | token 与基线完全相同，**11.4x** |
+| AX/Axpy-N 单矩阵（K=5120,N=17408） | 8.4 ms（5.46x） | max_abs 0.0029，0/17408 超差 |
+
 
 **语义正确性（同一引擎、同一权重）**
 
@@ -228,4 +246,26 @@ code/                其他支线（ToF U3V 直连、深度补全）
 
 > 完整的前后对比数据、瓶颈分析与复现命令见 [docs/优化总结与复现.md](docs/优化总结与复现.md)。
 
-> Moondream3 推荐用 AX 布局跑 decode（10.9x）：`MD3_LAYOUT=axpy ./md3_engine --dir .../moondream3_310b_ax --ids ... --gen 8`；Qwen 27B 的 AX 路径（4.0x）需 `ENG27_LAYOUT=axpy ENG27_DIR=.../qwen38_310b_ax`。
+> Moondream3 推荐用 AX 布局跑 decode（11.4x → 4.8 tok/s）：`MD3_LAYOUT=axpy ./md3_engine --dir .../moondream3_310b_ax --ids ... --gen 8`；Qwen 27B 的 AX 路径（4.0x）需 `ENG27_LAYOUT=axpy ENG27_DIR=.../qwen38_310b_ax`。
+---
+
+## Moondream3 优化（AX 布局，11.4x）
+
+Moondream3（VLM，W4A16 + MoE，24 层）与 Qwen 共用同一套 W4A16 GEMV/AX 基础设施，收益更大：
+
+| 场景 | 优化前 | 优化后 | 加速 | token |
+|---|---|---|---|---|
+| decode（默认 gen2） | 2.39 s/token | 2.00 s/token | 1.18x | ✓ |
+| **decode（AX/Axpy-N，`MD3_LAYOUT=axpy`）** | 2.39 s/token | **0.21 s/token = 4.8 tok/s** | **11.4x** | ✓ 完全相同 |
+
+```bash
+# 一次性生成 AX 权重（约 1.5 分钟）
+cd ~/code/qwen38_310B/src && ./out/bin/qwen38_ops_test relayout \
+   ~/code/moondream3_310b/models/moondream3_310b ~/code/moondream3_310b/models/moondream3_310b_ax
+# 跑 decode
+cd ~/code/moondream3_310b/ops && MD3_LAYOUT=axpy ./md3_engine \
+   --dir ~/code/moondream3_310b/models/moondream3_310b_ax --ids 0,1,15381,2,8299,1158,3 --gen 8
+```
+
+收益比 27B 大的原因：Moondream 的矩阵都很小（H=2048、专家 2048→2048），旧 GEMV 受"每行 ~48 条指令"的**下发开销**支配，
+而 Axpy-N 的开销与字节数成正比。权重与模型卡：https://huggingface.co/dong2542107715/moondream3-preview-ascend310b
