@@ -1,33 +1,32 @@
-# OrangePi AI Pro 20T（Ascend 310B1）上的自研 AscendC 推理栈：Qwen3.8-27B + Moondream3
+# Qwen3.8-27B (Qwen3.5 hybrid GDN) 在 OrangePi AI Pro 20T / Ascend 310B1 上的自研 AscendC 推理栈
 
 [![GitHub](https://img.shields.io/badge/GitHub-qwen38--27B--ascendc-black)](https://github.com/dong-12345/qwen38-27B-ascendc)
 [![HuggingFace](https://img.shields.io/badge/&#129303;-Qwen3.8--27B--AscendC--W4A16-yellow)](https://huggingface.co/dong2542107715/Qwen3.8-27B-AscendC-W4A16)
-[![HuggingFace](https://img.shields.io/badge/&#129303;-Moondream3--Ascend310B-orange)](https://huggingface.co/dong2542107715/moondream3-preview-ascend310b)
 
 在 **OrangePi AI Pro 20T（Ascend 310B1，单 AI Core，CANN 8.0.0，23 GB 内存，~1.46 TFLOPS Cube）** 上，
-用**纯 AscendC 手写算子 + 自研推理引擎**跑通两个 4bit（W4A16 group-32 非对称）模型，并做了系统性的性能优化：
+用**纯 AscendC 手写算子 + 自研推理引擎**跑通 **Qwen3.8-27B（28B 参数，W4A16 group-32 非对称 4bit）** 并做性能优化：
 
-| 模型 | 指标 | 优化前 | **优化后** | 加速 | 输出一致性 |
-|---|---|---|---|---|---|
-| **Qwen3.8-27B**（28B，48 层 GDN + 16 层全注意力） | **prefill**（17 token） | 212.8 s（12.52 s/token） | **37.1 s（2.18 s/token）** | **5.7x** | ✓ token 完全相同 |
-| | **decode**（默认 gen2） | 14.28 s/token | 12.6 s/token | 1.1x | ✓ 逐位相同 |
-| | **decode**（AX/Axpy-N） | 14.28 s/token | **3.60 s/token** | **4.0x** | ✓ token 完全相同 |
-| **Moondream3**（VLM，W4A16 + MoE） | **decode** | 2.39 s/token | **0.21 s/token = 4.8 tok/s** | **11.4x** | ✓ token 完全相同 |
+| 指标 | 优化前 | **优化后** | 加速 | 输出一致性 |
+|---|---|---|---|---|
+| **prefill**（17 token） | 212.8 s（12.52 s/token） | **37.1 s（2.18 s/token）** | **5.7x** | ✓ token 完全相同 |
+| **decode**（默认 gen2） | 14.28 s/token | 12.6 s/token | 1.1x | ✓ 逐位相同 |
+| **decode**（AX/Axpy-N，`ENG27_LAYOUT=axpy`） | 14.28 s/token | **3.60 s/token** | **4.0x** | ✓ token 完全相同 |
+| Cube 两段式单矩阵（M=32） | 1746 / 989 ms | 72.2 / 64.0 ms | 24.2x / 15.5x | max_abs 0.0078 / 0.0020 |
 
-> 完整的前后对比、瓶颈定位方法、复现命令与踩坑记录：[docs/优化总结与复现.md](docs/优化总结与复现.md)
+> 完整的前后对比、瓶颈定位、复现命令与踩坑记录：[docs/优化总结与复现.md](docs/优化总结与复现.md)
+> 姊妹项目（Moondream3，同一套 W4A16/AX 基础设施，decode 11.4x → 4.8 tok/s）：
+> [dong-12345/moondream3_310b](https://github.com/dong-12345/moondream3_310b)
 
-**两个关键结论**（都是板端实测推导出来的）：
-1. **prefill 慢的根因是"逐 token 逐行 GEMV"** → 改成 layer-major 批量 + `dequant_w4`(AIV) + `aclnnMatmul`(Cube)
-   两段式，单矩阵实测 **24.2x / 15.5x**，端到端 **5.7x**。
+**两个关键结论**（板端实测推导）：
+1. **prefill 慢的根因是"逐 token 逐行 GEMV"** → layer-major 批量 + `dequant_w4`(AIV) + `aclnnMatmul`(Cube) 两段式；
 2. **decode 慢的根因不是带宽，而是"每输出行的向量指令条数"**（~48 条/行 × 65 ns ≈ 3.1 µs/行；10.2 GB/s 只用到 9%）
-   → 权重离线重排成 **AX `[g][w8][n]`** + 沿 N 向量化的 **Axpy-N kernel**（无归约树），**4.0x / 11.4x**。
-   物理地板：27B 每 token 15.73 GB ÷ 10.2 GB/s = 1.54 s/token（单核 0.65 tok/s）。
+   → 权重离线重排成 **AX `[g][w8][n]`** + 沿 N 向量化的 **Axpy-N kernel**（无归约树）。
+   物理地板：每 token 15.73 GB ÷ 10.2 GB/s = 1.54 s/token（单核 0.65 tok/s）。
 
 > 本项目**不依赖** MindIE / vLLM / Ascend C 的模型库，所有算子（含 Gated DeltaNet 全流程、部分 RoPE GQA 解码、
 > 4bit 非对称权重 GEMV）都是自己用 AscendC 写的；推理引擎自己调度、自己管 NPU 显存与 KV/GDN 状态。
 
 ---
-
 ## 1. 结果速览（全部为板端实测）
 
 | 项 | 结果 | 说明 |

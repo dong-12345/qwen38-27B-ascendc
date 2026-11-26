@@ -48,4 +48,5 @@ Thumbs.db
 
 # 本地备份（不进仓库）
 备份/
-
+# Moondream3 项目有独立仓库 dong-12345/moondream3_310b，父仓库不重复保存
+code/moondream3_310b/
