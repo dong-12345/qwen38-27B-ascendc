@@ -1029,7 +1029,7 @@ post-attn: corr=0.013              ❌
 ③ 用更长、更标准的 prompt 验证（当前 prompt 只有 9 token）。
 
 ### 10.46 关于 PromptDA 交接
-原 `lingbot-depth` 子代理已完成 yolo 清理并写了 `code/depth_completion/HANDOVER.md`，请求新建子代理接手 PromptDA + Foxglove 任务。
+原 `lingbot-depth` 子代理已完成 yolo 清理并写了交接文档（`code/depth_completion/`，**该目录已于后续删除**），请求新建子代理接手 PromptDA + Foxglove 任务。
 **注意**：本轮我的工具集中没有 `subagent` 工具（返回 unknown tool），无法直接新建子代理；需要用户在支持的环境里创建，或我直接用现有工具完成该任务（可作为下一步）。
 
 ### 10.47 ★ 决定性验证：板端引擎 logits 与 PC 全 64 层独立参考**完全一致**（2026-11-22 13:05）

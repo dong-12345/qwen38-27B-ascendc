@@ -17,8 +17,36 @@
 #define CK(x) do { aclError _r=(x); if(_r!=ACL_ERROR_NONE){ printf("[md3] acl err %d line %d\n",(int)_r,__LINE__); return 1; } } while(0)
 
 // ---- kernels ----
+// AX kernel 的 NT 选择：NT 越大 Axpy 指令数越少，但 UB 受限。
+// 实测 UB 账目（fp16 模式）：NT=2048 时约 258KB > 248KB 上限，故 2048 暂不可用。
+static inline int32_t AX_NT_SEL(int32_t K)
+{
+    if (getenv("ENG27_AX_F32") != nullptr) return -512;
+    if (K <= 8192) return 1024;
+    return 512;
+}
 void w4a16_gemv_gen_do(uint32_t b, void *st, uint8_t *act, uint8_t *wq, uint8_t *scales,
                        uint8_t *szs, uint8_t *out, int32_t K, int32_t N, int32_t stage);
+void w4a16_gemv_gen2_do(uint32_t b, void *st, uint8_t *act, uint8_t *wq, uint8_t *scales,
+                        uint8_t *szs, uint8_t *out, int32_t K, int32_t N, int32_t stage);
+void w4a16_gemv_axpy_do(uint32_t b, void *st, uint8_t *act, uint8_t *wq, uint8_t *scales,
+                        uint8_t *szs, uint8_t *out, int32_t K, int32_t N, int32_t NT);
+// W4 GEMV 分发：默认 gen2（与 gen 逐位等价、快 1.18x）；MD3_GEMV_OLD=1 回落 gen
+// MD3_LAYOUT=axpy → 权重要求 AX 布局（[g][w8][n]），走沿 N 向量化的 Axpy-N kernel
+static inline void gemvW4(uint32_t b, void *st, uint8_t *act, uint8_t *wq, uint8_t *s, uint8_t *sz,
+                          uint8_t *out, int32_t K, int32_t N, int32_t stage)
+{
+    static int useOld = -1;
+    static int useAx = -1;
+    if (useOld < 0) { const char *e = getenv("MD3_GEMV_OLD"); useOld = (e != nullptr && strcmp(e, "1") == 0); }
+    if (useAx < 0) { const char *e = getenv("MD3_LAYOUT"); useAx = (e != nullptr && strcmp(e, "axpy") == 0); }
+    if (useAx && (K % 128 == 0) && ((K / 4) % 32 == 0) && (N % 16 == 0)) {
+        w4a16_gemv_axpy_do(b, st, act, wq, s, sz, out, K, N, AX_NT_SEL(K));
+        return;
+    }
+    if (useOld) w4a16_gemv_gen_do(b, st, act, wq, s, sz, out, K, N, stage);
+    else w4a16_gemv_gen2_do(b, st, act, wq, s, sz, out, K, N, stage);
+}
 void fp16_gemv_do(uint32_t b, void *st, uint8_t *act, uint8_t *w, uint8_t *out, int32_t K, int32_t N);
 void vec_axpy_do(uint32_t b, void *st, uint8_t *a, uint8_t *b_, uint8_t *out, float s, int32_t N);
 void layernorm_f16_do(uint32_t b, void *st, uint8_t *x, uint8_t *w, uint8_t *bb, uint8_t *y,
@@ -493,7 +521,7 @@ struct Eng {
         printf("[md3] weights loaded in %.1fs\n", now() - t0);
         // w4a16_gemv_gen 已知"进程内首次调用结果异常"，这里预热一次丢弃
         if (d_zero && lmW4.w) {
-            w4a16_gemv_gen_do(1, g_stream, d_zero, lmW4.w, lmW4.s, lmW4.sz, d_logits, cfg.hidden, cfg.vocab, 99);
+            gemvW4(1, g_stream, d_zero, lmW4.w, lmW4.s, lmW4.sz, d_logits, cfg.hidden, cfg.vocab, 99);
             fp16_gemv_do(1, g_stream, d_zero, layers[0].tauwq.dev, d_taq, 3 * cfg.hidden, 32);
             if (sync()) return 1;
         }
@@ -522,13 +550,13 @@ struct Eng {
             Layer &L = layers[li];
             layernorm_f16_do(1, g_stream, d_x, L.lnw.dev, L.lnb.dev, d_xn, H, 1, cfg.eps);
             { char nm[32]; snprintf(nm, sizeof(nm), "L%d_xn", li); dumpDev(nm, d_xn, H * 2); }
-            w4a16_gemv_gen_do(1, g_stream, d_xn, L.qkv.w, L.qkv.s, L.qkv.sz, d_qkv, H, 3 * H, 99);
+            gemvW4(1, g_stream, d_xn, L.qkv.w, L.qkv.s, L.qkv.sz, d_qkv, H, 3 * H, 99);
             add_bias_f16_do(1, g_stream, d_qkv, L.qkvb.dev, 1, 3 * H);
             { char nm[32]; snprintf(nm, sizeof(nm), "L%d_qkv", li); dumpDev(nm, d_qkv, 3 * H * 2); }
             gelu_f16_do(1, g_stream, d_qkv, d_gelu, 3 * H);
             fp16_gemv_do(1, g_stream, d_gelu, L.tauwq.dev, d_taq, 3 * H, 32);
             fp16_gemv_do(1, g_stream, d_gelu, L.tauwv.dev, d_tav, 3 * H, 32);
-            if (L.moe) w4a16_gemv_gen_do(1, g_stream, d_xn, L.router.w, L.router.s, L.router.sz,
+            if (L.moe) gemvW4(1, g_stream, d_xn, L.router.w, L.router.s, L.router.sz,
                                          d_router, H, cfg.n_experts, 99);
             if (sync()) return 1;
             uint16_t hq[32], hv[32], hrt[64];
@@ -562,17 +590,17 @@ struct Eng {
             attn_decode_text_do(1, g_stream, d_qkv, d_tauq, d_tauv, d_cos, d_sin, kc[li], vc[li],
                                 d_attn, pos);
             { char nm[32]; snprintf(nm, sizeof(nm), "L%d_attn", li); dumpDev(nm, d_attn, H * 2); }
-            w4a16_gemv_gen_do(1, g_stream, d_attn, L.o.w, L.o.s, L.o.sz, d_proj, H, H, 99);
+            gemvW4(1, g_stream, d_attn, L.o.w, L.o.s, L.o.sz, d_proj, H, H, 99);
             add_bias_f16_do(1, g_stream, d_proj, L.ob.dev, 1, H);
             { char nm[32]; snprintf(nm, sizeof(nm), "L%d_proj", li); dumpDev(nm, d_proj, H * 2); }
             vec_axpy_do(1, g_stream, d_x, d_proj, d_x, 1.0f, H);
             if (!L.moe) {
-                w4a16_gemv_gen_do(1, g_stream, d_xn, L.fc1.w, L.fc1.s, L.fc1.sz, d_fc1, H, cfg.dense_ff, 99);
+                gemvW4(1, g_stream, d_xn, L.fc1.w, L.fc1.s, L.fc1.sz, d_fc1, H, cfg.dense_ff, 99);
                 add_bias_f16_do(1, g_stream, d_fc1, L.fc1b.dev, 1, cfg.dense_ff);
                 { char nm[32]; snprintf(nm, sizeof(nm), "L%d_fc1pre", li); dumpDev(nm, d_fc1, cfg.dense_ff * 2); }
                 gelu_f16_do(1, g_stream, d_fc1, d_fc1, cfg.dense_ff);
                 { char nm[32]; snprintf(nm, sizeof(nm), "L%d_h", li); dumpDev(nm, d_fc1, cfg.dense_ff * 2); }
-                w4a16_gemv_gen_do(1, g_stream, d_fc1, L.fc2.w, L.fc2.s, L.fc2.sz, d_mlp,
+                gemvW4(1, g_stream, d_fc1, L.fc2.w, L.fc2.s, L.fc2.sz, d_mlp,
                                   cfg.dense_ff, H, 99);
                 add_bias_f16_do(1, g_stream, d_mlp, L.fc2b.dev, 1, H);
                 { char nm[32]; snprintf(nm, sizeof(nm), "L%d_mlp", li); dumpDev(nm, d_mlp, H * 2); }
@@ -582,9 +610,9 @@ struct Eng {
                 topk8(hrt, cfg.n_experts, idx, wt, cfg.topk);
                 for (int k = 0; k < cfg.topk; ++k) {
                     W4 &e1 = L.efc1[idx[k]], &e2 = L.efc2[idx[k]];
-                    w4a16_gemv_gen_do(1, g_stream, d_xn, e1.w, e1.s, e1.sz, d_e1, H, 2048, 99);
+                    gemvW4(1, g_stream, d_xn, e1.w, e1.s, e1.sz, d_e1, H, 2048, 99);
                     geglu_f16_do(1, g_stream, d_e1, d_e1 + 1024 * 2, d_e1, 1024);
-                    w4a16_gemv_gen_do(1, g_stream, d_e1, e2.w, e2.s, e2.sz, d_e2, 1024, 2048, 99);
+                    gemvW4(1, g_stream, d_e1, e2.w, e2.s, e2.sz, d_e2, 1024, 2048, 99);
                     if (k == 0) vec_axpy_do(1, g_stream, d_zero, d_e2, d_mlp, wt[k], H);
                     else vec_axpy_do(1, g_stream, d_mlp, d_e2, d_mlp, wt[k], H);
                 }
@@ -593,7 +621,7 @@ struct Eng {
             { char nm[32]; snprintf(nm, sizeof(nm), "L%d_out", li); dumpDev(nm, d_x, H * 2); }
         }
         layernorm_f16_do(1, g_stream, d_x, fnW.dev, fnB.dev, d_xn, H, 1, cfg.eps);
-        w4a16_gemv_gen_do(1, g_stream, d_xn, lmW4.w, lmW4.s, lmW4.sz, d_logits, H, cfg.vocab, 99);
+        gemvW4(1, g_stream, d_xn, lmW4.w, lmW4.s, lmW4.sz, d_logits, H, cfg.vocab, 99);
         if (sync()) return 1;
         std::vector<uint16_t> hl(cfg.vocab);
         if (download(hl.data(), d_logits, cfg.vocab * 2)) return 1;
@@ -826,7 +854,7 @@ struct Eng {
                 int row = allLogits ? i : (T - 1);
                 if (d2d(p_last, p_x + (size_t)row * H * 2, H * 2)) return 1;
                 layernorm_f16_do(1, g_stream, p_last, fnW.dev, fnB.dev, d_xn, H, 1, cfg.eps);
-                w4a16_gemv_gen_do(1, g_stream, d_xn, lmW4.w, lmW4.s, lmW4.sz, d_logits, H, cfg.vocab, 99);
+                gemvW4(1, g_stream, d_xn, lmW4.w, lmW4.s, lmW4.sz, d_logits, H, cfg.vocab, 99);
                 if (sync()) return 1;
                 std::vector<uint16_t> hl(cfg.vocab);
                 if (download(hl.data(), d_logits, (size_t)cfg.vocab * 2)) return 1;
@@ -1235,7 +1263,7 @@ int run_impl(int argc, char **argv) {
         fread(hact.data(), 2, 8192, fa); fclose(fa);
         uint8_t *dact = (uint8_t *)devAlloc(8192 * 2), *dout = (uint8_t *)devAlloc(2048 * 2);
         upload(dact, hact.data(), 8192 * 2);
-        w4a16_gemv_gen_do(1, g_stream, dact, eng.layers[0].fc2.w, eng.layers[0].fc2.s,
+        gemvW4(1, g_stream, dact, eng.layers[0].fc2.w, eng.layers[0].fc2.s,
                           eng.layers[0].fc2.sz, dout, 8192, 2048, 99);
         sync();
         std::vector<uint16_t> ho(2048);

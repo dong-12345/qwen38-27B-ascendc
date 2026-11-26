@@ -7,7 +7,6 @@ tmp/
 code/*/models/
 code/*/results/
 code/*/data/
-code/*/lingbot-depth/
 *.img
 *.img.xz
 *.safetensors

@@ -1,4 +1,4 @@
-﻿# code/ — 项目目录
+# code/ — 项目目录
 
 所有工程/项目按子目录存放，一个项目一个文件夹。临时脚本、旧版实验、厂商安装包不放在这里。
 
@@ -6,6 +6,7 @@
 |---|---|
 | [`tof_u3v_sdk/`](tof_u3v_sdk/README.md) | **自研 ToF 相机 U3V 直连 SDK**（libusb 实现，绕过海康 Linux SDK）：30fps 取流、软触发、延迟测量、协议抓包工具 |
 | [`tof_mapping/`](tof_mapping/README.md) | **实时建图项目**：SLAM/建图算子基准、ORB-SLAM3 RGB-D 在板端的编译与运行 |
+| [`moondream3_310b/`](moondream3_310b/README.md) | **Moondream 3 Preview（9B MoE VLM）端侧部署**：自研 W4A16 GEMV + ACLNN 混合引擎，文本生成与图像问答 |
 
 ## 背景（一句话）
 

@@ -1,0 +1,1 @@
+cd ~/code/qwen38_310B/src && grep -n "SetFlag<AscendC::HardEvent::MTE2_V>\|WaitFlag<AscendC::HardEvent::MTE2_V>\|V_MTE2" kernels/w4a16_gemv_batch.cpp | head -20; pkill -f qwen38_ops_test; sleep 1; echo killed

@@ -1,11 +1,13 @@
-﻿# Qwen3.8-27B (Qwen3.5 hybrid GDN) 在 OrangePi AI Pro 20T / Ascend 310B 上的自研 AscendC 推理栈
+# Qwen3.8-27B (Qwen3.5 hybrid GDN) 在 OrangePi AI Pro 20T / Ascend 310B 上的自研 AscendC 推理栈
 
 [![GitHub](https://img.shields.io/badge/GitHub-qwen38--27B--ascendc-black)](https://github.com/dong-12345/qwen38-27B-ascendc)
 [![HuggingFace](https://img.shields.io/badge/&#129303;-Qwen3.8--27B--AscendC--W4A16-yellow)](https://huggingface.co/dong2542107715/Qwen3.8-27B-AscendC-W4A16)
 
 在 **OrangePi AI Pro 20T（Ascend 310B1，CANN 8.0.0，23GB 内存，~1.46 TFLOPS Cube）** 上，
 用**纯 AscendC 手写算子 + 自研推理引擎**跑通 **Qwen3.8-27B（28B 参数，4bit 量化，48 层 Gated DeltaNet + 16 层全注意力）**，
-输出语义正确，实测 **0.069 tok/s（≈14.5 s/token）**。
+输出语义正确，实测 **0.080 tok/s（≈12.5 s/token）**。
+性能定位与提速路线见 [docs/GEMV性能分析与优化路线.md](docs/GEMV性能分析与优化路线.md)：
+**瓶颈是"每输出行的向量指令条数"（~48 条/行 × 65 ns），不是带宽（10.2 GB/s 只用到 9%）**。
 
 > 本项目**不依赖** MindIE / vLLM / Ascend C 的模型库，所有算子（含 Gated DeltaNet 全流程、部分 RoPE GQA 解码、
 > 4bit 非对称权重 GEMV）都是自己用 AscendC 写的；推理引擎自己调度、自己管 NPU 显存与 KV/GDN 状态。
@@ -19,7 +21,9 @@
 | 1 层（调试子集） | 0.96 s/forward | 单层对拍用 |
 | 41 层子集 | 0.110 tok/s（9.12 s/token） | 9.10 GB 权重，加载 51.5 s |
 | 48 层子集 | 0.075 tok/s（13.31 s/token） | 10.48 GB 权重，加载 69 s |
-| **64 层全量** | **0.069–0.070 tok/s（14.3–14.6 s/token）** | **16.9 GB 权重全部驻留 NPU**，加载 ~84 s |
+| **64 层全量 decode（gen2）** | **0.080 tok/s（12.55 s/token）** | 逐位一致基线 |
+| **64 层全量 decode（AX）** | **0.278 tok/s（3.60 s/token）** | token 与基线完全相同，**4.0x** |
+| **64 层全量 prefill** | **0.46 tok/s（2.19 s/token）** | Cube 两段式（dequant+MatMul）批量，**5.7x** |
 
 **语义正确性（同一引擎、同一权重）**
 
@@ -93,7 +97,7 @@
 
 ```bash
 # 依赖：CANN 8.0.0（/usr/local/Ascend/ascend-toolkit/latest）
-cd ascendc_ops
+cd code/qwen38_310b/ops
 bash run.sh build                     # 产物：out/lib、qwen38_ops_test
 source /usr/local/Ascend/ascend-toolkit/latest/bin/setenv.bash
 export LD_LIBRARY_PATH=$PWD/out/lib:$PWD/out/lib64:/usr/local/Ascend/ascend-toolkit/latest/lib64:$LD_LIBRARY_PATH
@@ -154,7 +158,7 @@ python tools/run_27b_demo.py --prompt "The capital of France is" --gen 6
 ## 6. 仓库结构
 
 ```
-ascendc_ops/
+code/qwen38_310b/ops/
   kernels/          27 个 AscendC kernel 源文件（核心 14 个 + bench/probe 工具）
   host/             engine_27b.cpp（27B 引擎）、engine_mini.cpp、main.cpp（单测调度）、data_utils.h
   cmake/ scripts/   构建与数据生成
@@ -180,9 +184,21 @@ code/                其他支线（ToF U3V 直连、深度补全）
 
 ## 7. 已知限制 / 下一步
 
-- **性能**：14.5 s/token 是**纯向量核 GEMV** 的结果（310B 单 AI core、W4 权重带宽受限）。
-  提速方向：Cube 矩阵乘替换 GEMV、prefill 批量化（当前 prefill 与 decode 同速）、
-  减少每层 kernel 启动数（当前 ~20 个/token/层）。
+- **性能定位（2026-11-24 实测，详见 [docs/GEMV性能分析与优化路线.md](docs/GEMV性能分析与优化路线.md)）**：
+  14.62 s/token 里 **≈100% 是自研 W4A16 GEMV**。结论是**指令条数受限，不是带宽**：
+  单核 GM 读实测 10.2 GB/s，13.53 GB 权重的带宽地板是 **1.32 s/token**，当前只用掉 9%；
+  旧 kernel 每输出行 ~48 条向量指令，实测 **3.2 µs/行 ≈ 48 × 67 ns**（每条指令固定开销 ~70 ns，
+  用新增的 `kernels/probe_v2.cpp` 探针测得）。所以提速的关键是**减少每行的指令条数**。
+- **已做的尝试**：行批处理实验内核 `kernels/w4a16_gemv_batch.cpp` 把指令数降到 ~10/行，
+  实测 **55.6 → 34.5 ms（1.61x，0.80 → 1.29 GB/s）**；但数值尚未与 `w4a16_gemv_gen` 等价，
+  因此**默认关闭**（`ENG27_GEMV_V2=1` 才启用），仅作性能研究基线。
+- **真正的 5–10x 路线（未做，2–3 周）**：Cube 融合反量化 MMAD
+  （GM int4 → UB 反量化 → L1 NZ → `Mmad` → `Fixpipe`），流量保持 0.5 B/param，
+  预期 decode 2–3 s/token、prefill（M=64 批）~0.2 s/token；可行性依据见
+  [docs/310B-性能上限与prefill优化.md](docs/310B-性能上限与prefill优化.md) §6.3。
+- **prefill 与 decode 同速**（都是逐 token 走同一路径，14.66 s/token）；
+  按 token 批处理的设计与内核草案见 `kernels/w4a16_gemv_tok.cpp` +
+  [docs/prefill-token批量GEMV设计.md](docs/prefill-token批量GEMV设计.md)（未接线）。
 - **首调异常**：`w4a16_gemv_gen` 在进程内首次调用结果异常，引擎用 `ENG27_DOUBLE_GEMV`（先跑一次丢弃）
   或 warmup 前向规避；根因未完全定位。
 - **MTP**：`mtp_num_hidden_layers=1` 未接入（不影响基础生成）。
@@ -192,7 +208,7 @@ code/                其他支线（ToF U3V 直连、深度补全）
 
 ## 8. License
 
-本仓库代码（`ascendc_ops/`、`tools/`）以 **Apache License 2.0** 发布。
+本仓库代码（`code/qwen38_310b/ops/`、`tools/`）以 **Apache License 2.0** 发布。
 
 上游模型 `Qwen3.8-27B` 的 LICENSE 实测为 **Apache License 2.0**
 （Copyright 2026 Alibaba Cloud，见原始权重目录的 LICENSE）。Apache-2.0 **允许再分发与修改**，
@@ -207,3 +223,9 @@ code/                其他支线（ToF U3V 直连、深度补全）
 
 > ⚠️ 转换后的权重是**实验性格式**（仅自研引擎可用）；需要通用格式请使用官方原始权重。
 > 商用或再分发前请自行复核上游许可条款与适用法律。
+
+---
+
+> 完整的前后对比数据、瓶颈分析与复现命令见 [docs/优化总结与复现.md](docs/优化总结与复现.md)。
+
+> Moondream3 推荐用 AX 布局跑 decode（10.9x）：`MD3_LAYOUT=axpy ./md3_engine --dir .../moondream3_310b_ax --ids ... --gen 8`；Qwen 27B 的 AX 路径（4.0x）需 `ENG27_LAYOUT=axpy ENG27_DIR=.../qwen38_310b_ax`。
